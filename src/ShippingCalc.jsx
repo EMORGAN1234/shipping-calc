@@ -60,20 +60,20 @@ function calcCoil({ alloy, thickness, width, weight, coreId }) {
   const lengthIn = volIn3 / (t * w);
   const lengthFt = lengthIn / 12;
   const od       = Math.sqrt((4 * lengthIn * t) / Math.PI + id * id);
-  if (od <= id) return { error: "Calculated OD ≤ Core ID — check gauge, width, or weight." };
+  if (od <= id) return { error: "Calculated OD <= Core ID - check gauge, width, or weight." };
   const skidLen  = Math.ceil((w + 4) / 2) * 2;
   const skidWid  = getSaddleWidth(od);
   const skidH    = 6;
   const totalH   = od + skidH;
   const prodType = getProductType(t);
   const flags = [];
-  if (od > 72)      flags.push({ level: "warn",   msg: `OD ${fmtN(od)}" exceeds 72"  —  verify skid/saddle load rating and coil handling equipment` });
-  else if (od > 60) flags.push({ level: "info",   msg: `Large OD (${fmtN(od)}")  —  confirm saddle and handling equipment are rated for this diameter` });
-  if (totalH > 96)       flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  —  specialized freight or open-top trailer may be required` });
-  else if (totalH > 72)  flags.push({ level: "warn",   msg: `Stack height ${fmtN(totalH)}"  —  verify dock door height and warehouse rack clearance` });
-  if (lbs > 20000)      flags.push({ level: "danger", msg: `Coil weight ${lbs.toLocaleString()} lbs >20,000  —  heavy-lift equipment required` });
-  else if (lbs > 15000) flags.push({ level: "warn",   msg: `Coil weight ${lbs.toLocaleString()} lbs  —  verify forklift rated capacity` });
-  if (lengthFt > 8000) flags.push({ level: "info", msg: `Very long coil (${Math.round(lengthFt).toLocaleString()} ft)  —  confirm weld count with supplier` });
+  if (od > 72)      flags.push({ level: "warn",   msg: `OD ${fmtN(od)}" exceeds 72"  -  verify skid/saddle load rating and coil handling equipment` });
+  else if (od > 60) flags.push({ level: "info",   msg: `Large OD (${fmtN(od)}")  -  confirm saddle and handling equipment are rated for this diameter` });
+  if (totalH > 96)       flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  -  specialized freight or open-top trailer may be required` });
+  else if (totalH > 72)  flags.push({ level: "warn",   msg: `Stack height ${fmtN(totalH)}"  -  verify dock door height and warehouse rack clearance` });
+  if (lbs > 20000)      flags.push({ level: "danger", msg: `Coil weight ${lbs.toLocaleString()} lbs >20,000  -  heavy-lift equipment required` });
+  else if (lbs > 15000) flags.push({ level: "warn",   msg: `Coil weight ${lbs.toLocaleString()} lbs  -  verify forklift rated capacity` });
+  if (lengthFt > 8000) flags.push({ level: "info", msg: `Very long coil (${Math.round(lengthFt).toLocaleString()} ft)  -  confirm weld count with supplier` });
   return {
     density, volIn3: Math.round(volIn3),
     lengthIn: Math.round(lengthIn), lengthFt: Math.round(lengthFt),
@@ -98,13 +98,13 @@ function calcSheet({ alloy, thickness, width, length, qty }) {
   const skidWid  = w + 4;
   const prodType = getProductType(t);
   const flags = [];
-  if (prodType === "PLATE") flags.push({ level: "info", msg: `Plate classification (≥ .250")  —  edge/corner protection recommended in transit` });
-  if (wtPerPc > 500)       flags.push({ level: "warn",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  —  mechanical handling required` });
-  else if (wtPerPc > 300)  flags.push({ level: "info",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  —  mechanical assist recommended` });
-  if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  —  heavy-lift equipment required` });
-  else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  —  verify forklift capacity` });
-  if (skidLen > 240) flags.push({ level: "danger", msg: `Skid length ${skidLen}"  —  flatbed or specialized freight likely required` });
-  else if (l > 192)  flags.push({ level: "warn",   msg: `Sheet length ${l}"  —  verify dock/trailer clearance for unloading` });
+  if (prodType === "PLATE") flags.push({ level: "info", msg: `Plate classification (>= .250")  -  edge/corner protection recommended in transit` });
+  if (wtPerPc > 500)       flags.push({ level: "warn",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical handling required` });
+  else if (wtPerPc > 300)  flags.push({ level: "info",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical assist recommended` });
+  if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  -  heavy-lift equipment required` });
+  else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  -  verify forklift capacity` });
+  if (skidLen > 240) flags.push({ level: "danger", msg: `Skid length ${skidLen}"  -  flatbed or specialized freight likely required` });
+  else if (l > 192)  flags.push({ level: "warn",   msg: `Sheet length ${l}"  -  verify dock/trailer clearance for unloading` });
   return {
     density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
     stackThk: stackThk.toFixed(3), totalH: totalH.toFixed(1),
@@ -116,24 +116,24 @@ function calcSheet({ alloy, thickness, width, length, qty }) {
 // ── SHARED: FLAG BANNERS ──────────────────────────────────────────────────────
 function FlagBanner({ flag }) {
   const map = {
-    danger: "from-red-900/30 to-red-800/30 border-red-500/50 text-red-300",
-    warn:   "from-amber-900/30 to-orange-900/30 border-amber-500/50 text-amber-200",
-    info:   "from-neutral-800/50 to-neutral-800/30 border-neutral-500/30 text-neutral-300",
+    danger: "bg-red-50 border-red-400 text-red-800",
+    warn:   "bg-amber-50 border-amber-400 text-amber-900",
+    info:   "bg-neutral-100 border-neutral-300 text-neutral-700",
   };
   const icon = { danger: "⚠", warn: "⚠", info: "◈" };
   return (
-    <div className={`bg-gradient-to-r ${map[flag.level]} border p-3 mb-2 rounded-xl flex items-start gap-3`}>
+    <div className={`${map[flag.level]} border p-3 mb-2 rounded-xl flex items-start gap-3`}>
       <span className="flex-shrink-0 mt-0.5">{icon[flag.level]}</span>
-      <p className="text-sm font-medium">{flag.msg}</p>
+      <p className="text-sm font-semibold">{flag.msg}</p>
     </div>
   );
 }
 
 // ── COIL DETAIL CARD ──────────────────────────────────────────────────────────
 function CoilDetail({ result, inputs }) {
-  const lbs       = parseFloat(inputs.weight);
-  const totalHNum = parseFloat(result.totalH);
-  const heightOk  = totalHNum <= 72;
+  const lbs        = parseFloat(inputs.weight);
+  const totalHNum  = parseFloat(result.totalH);
+  const heightOk   = totalHNum <= 72;
   const heightWarn = totalHNum > 72 && totalHNum <= 96;
 
   return (
@@ -152,6 +152,7 @@ function CoilDetail({ result, inputs }) {
 
       <div className="p-5">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Coil Geometry</p>
             <p className="text-sm font-medium text-neutral-600">Outer Diameter</p>
@@ -226,10 +227,10 @@ function CoilDetail({ result, inputs }) {
 
 // ── SHEET / PLATE DETAIL CARD ─────────────────────────────────────────────────
 function SheetDetail({ result, inputs }) {
-  const q         = parseInt(inputs.qty);
-  const skidLenN  = parseFloat(result.skidLen);
-  const skidOk    = skidLenN <= 144;
-  const skidWarn  = skidLenN > 144 && skidLenN <= 240;
+  const q        = parseInt(inputs.qty);
+  const skidLenN = parseFloat(result.skidLen);
+  const skidOk   = skidLenN <= 144;
+  const skidWarn = skidLenN > 144 && skidLenN <= 240;
 
   return (
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
@@ -247,6 +248,7 @@ function SheetDetail({ result, inputs }) {
 
       <div className="p-5">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Piece / Bundle</p>
             <p className="text-sm font-medium text-neutral-600">Weight / Piece</p>
@@ -354,9 +356,9 @@ function TechRef() {
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Coil Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
-                <p><span className="font-bold text-neutral-800">Volume:</span> Weight ÷ Density</p>
-                <p><span className="font-bold text-neutral-800">Length:</span> Volume ÷ (Gauge × Width)</p>
-                <p><span className="font-bold text-neutral-800">OD:</span> √(4 × L × t ÷ π + ID²)</p>
+                <p><span className="font-bold text-neutral-800">Volume:</span> Weight / Density</p>
+                <p><span className="font-bold text-neutral-800">Length:</span> Volume / (Gauge x Width)</p>
+                <p><span className="font-bold text-neutral-800">OD:</span> sqrt(4 x L x t / pi + ID²)</p>
                 <p><span className="font-bold text-neutral-800">Stack Height:</span> OD + 6" skid</p>
                 <p className="mt-2 pt-2 border-t border-neutral-100">
                   <span className="font-bold text-neutral-800">Saddle width</span> scales with OD — widens for large coils to maintain stability.
@@ -366,12 +368,12 @@ function TechRef() {
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Sheet / Plate Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
-                <p><span className="font-bold text-neutral-800">Wt/Pc:</span> L × W × t × Density</p>
-                <p><span className="font-bold text-neutral-800">Stack:</span> Qty × Gauge + (Qty−1) × 0.004" interleave (standard kraft paper)</p>
+                <p><span className="font-bold text-neutral-800">Wt/Pc:</span> L x W x t x Density</p>
+                <p><span className="font-bold text-neutral-800">Stack:</span> Qty x Gauge + (Qty-1) x 0.004" interleave (standard kraft paper)</p>
                 <p><span className="font-bold text-neutral-800">Total H:</span> Stack + 1.0" dunnage + 5.5" skid</p>
                 <p><span className="font-bold text-neutral-800">Skid L:</span> Sheet Length + 4"</p>
                 <p><span className="font-bold text-neutral-800">Skid W:</span> Sheet Width + 4"</p>
-                <p className="mt-2 pt-2 border-t border-neutral-100">Plate ≥ .250" per ASTM B209. Sheet ≤ .249".</p>
+                <p className="mt-2 pt-2 border-t border-neutral-100">Plate >= .250" per ASTM B209. Sheet <= .249".</p>
               </div>
             </div>
           </div>
@@ -390,14 +392,12 @@ export default function ShippingCalc() {
   });
   const [coilResult, setCoilResult] = useState(null);
 
-  // totalWt is the input-form lbs field, kept in sync with qty
   const [sheetIn, setSheetIn] = useState({
     alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "",
   });
   const [sheetResult, setSheetResult] = useState(null);
 
-  // ── Sheet field updater — keeps qty ↔ totalWt in sync ──────────────────────
-  // `prioritize`: when both qty and totalWt exist, which one was just changed?
+  // ── Sheet field updater — keeps qty and totalWt in sync ────────────────────
   const updateSheet = (key, val) => {
     setSheetIn(prev => {
       const next = { ...prev, [key]: val };
@@ -405,16 +405,13 @@ export default function ShippingCalc() {
 
       if (wtPerPc && wtPerPc > 0) {
         if (key === "qty") {
-          // User edited qty → recompute totalWt
           const q = parseInt(val);
           next.totalWt = q > 0 ? (q * wtPerPc).toFixed(1) : "";
         } else if (key === "totalWt") {
-          // User edited totalWt → recompute qty
           const lbs = parseFloat(val);
           next.qty = lbs > 0 ? String(Math.round(lbs / wtPerPc)) : "";
         } else {
-          // Dimension changed — recalculate whichever quantity field is populated
-          // Prefer qty as source of truth if both are set; otherwise use whichever exists
+          // Dimension changed — qty takes priority as source of truth
           if (next.qty && parseInt(next.qty) > 0) {
             next.totalWt = (parseInt(next.qty) * wtPerPc).toFixed(1);
           } else if (next.totalWt && parseFloat(next.totalWt) > 0) {
@@ -441,7 +438,6 @@ export default function ShippingCalc() {
     setSheetResult(null);
   };
 
-  // Per-piece weight for display hint in inputs
   const liveWtPerPc = computeWtPerPc(sheetIn);
 
   return (
@@ -456,12 +452,6 @@ export default function ShippingCalc() {
         @keyframes pulse-glow {
           0%,100% { box-shadow: 0 0 5px rgba(220,38,38,0.3); }
           50%      { box-shadow: 0 0 20px rgba(220,38,38,0.6); }
-        }
-        .linked-field { position: relative; }
-        .linked-badge {
-          display: flex; align-items: center; justify-content: center;
-          color: #6b7280; font-size: 10px; font-weight: 700;
-          letter-spacing: 0.05em; user-select: none;
         }
       `}} />
 
@@ -609,23 +599,18 @@ export default function ShippingCalc() {
                   </div>
                 </div>
 
-                {/* Row 2: Qty ↔ Total Lbs linked pair */}
+                {/* Row 2: Qty and Total Lbs linked pair */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-0 sm:gap-0 w-full sm:w-auto">
-                  {/* Qty field */}
                   <div className="flex-1 sm:max-w-[160px]">
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
-                      Qty (pcs)
-                    </label>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Qty (pcs)</label>
                     <input
                       type="number" step="1" value={sheetIn.qty}
                       onChange={e => updateSheet("qty", e.target.value)}
                       onKeyDown={sheetKey} placeholder="5"
-                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-l-lg rounded-r-none focus:ring-2 focus:ring-red-500 bg-white font-medium border-r-0 sm:border-r-0"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 focus:ring-2 focus:ring-red-500 bg-white font-medium border-r-0"
                       style={{ borderRadius: "0.5rem 0 0 0.5rem" }}
                     />
                   </div>
-
-                  {/* Link badge */}
                   <div className="flex items-end">
                     <div
                       className="flex flex-col items-center justify-center px-2.5 bg-neutral-200 border-y border-neutral-300 text-neutral-500 font-bold"
@@ -635,9 +620,7 @@ export default function ShippingCalc() {
                       <span style={{ fontSize: "9px", marginTop: "2px", letterSpacing: "0.04em" }}>OR</span>
                     </div>
                   </div>
-
-                  {/* Total Lbs field */}
-                  <div className="flex-1 sm:max-w-[180px]">
+                  <div className="flex-1 sm:max-w-[200px]">
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
                       Total Weight (lbs)
                       {liveWtPerPc && (
@@ -654,8 +637,6 @@ export default function ShippingCalc() {
                       style={{ borderRadius: "0 0.5rem 0.5rem 0" }}
                     />
                   </div>
-
-                  {/* spacer so the row doesn't stretch full-width on desktop */}
                   <div className="hidden sm:block flex-1" />
                 </div>
 
