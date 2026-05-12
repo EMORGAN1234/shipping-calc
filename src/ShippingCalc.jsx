@@ -373,7 +373,7 @@ function TechRef() {
                 <p><span className="font-bold text-neutral-800">Total H:</span> Stack + 1.0" dunnage + 5.5" skid</p>
                 <p><span className="font-bold text-neutral-800">Skid L:</span> Sheet Length + 4"</p>
                 <p><span className="font-bold text-neutral-800">Skid W:</span> Sheet Width + 4"</p>
-                <p className="mt-2 pt-2 border-t border-neutral-100">Plate >= .250" per ASTM B209. Sheet <= .249".</p>
+                <p className="mt-2 pt-2 border-t border-neutral-100">Plate &gt;= .250" per ASTM B209. Sheet &lt;= .249".</p>
               </div>
             </div>
           </div>
