@@ -42,6 +42,14 @@ const getSaddleWidth = od => {
 const fmtN = (n, dec = 1) =>
   parseFloat(n).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 
+// Returns lbs/piece given a sheet state object — null if inputs incomplete
+const computeWtPerPc = s => {
+  const density = getDensity(s.alloy);
+  const t = parseFloat(s.thickness), w = parseFloat(s.width), l = parseFloat(s.length);
+  if (!t || !w || !l || t <= 0 || w <= 0 || l <= 0) return null;
+  return l * w * t * density;
+};
+
 // ── CALC: COIL ────────────────────────────────────────────────────────────────
 function calcCoil({ alloy, thickness, width, weight, coreId }) {
   const density = getDensity(alloy);
@@ -58,18 +66,13 @@ function calcCoil({ alloy, thickness, width, weight, coreId }) {
   const skidH    = 6;
   const totalH   = od + skidH;
   const prodType = getProductType(t);
-  // else-if per category — only the highest-severity condition fires for each concern
   const flags = [];
-  // OD diameter
   if (od > 72)      flags.push({ level: "warn",   msg: `OD ${fmtN(od)}" exceeds 72"  —  verify skid/saddle load rating and coil handling equipment` });
   else if (od > 60) flags.push({ level: "info",   msg: `Large OD (${fmtN(od)}")  —  confirm saddle and handling equipment are rated for this diameter` });
-  // Stack height
   if (totalH > 96)       flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  —  specialized freight or open-top trailer may be required` });
   else if (totalH > 72)  flags.push({ level: "warn",   msg: `Stack height ${fmtN(totalH)}"  —  verify dock door height and warehouse rack clearance` });
-  // Coil weight
   if (lbs > 20000)      flags.push({ level: "danger", msg: `Coil weight ${lbs.toLocaleString()} lbs >20,000  —  heavy-lift equipment required` });
   else if (lbs > 15000) flags.push({ level: "warn",   msg: `Coil weight ${lbs.toLocaleString()} lbs  —  verify forklift rated capacity` });
-  // Very long coil
   if (lengthFt > 8000) flags.push({ level: "info", msg: `Very long coil (${Math.round(lengthFt).toLocaleString()} ft)  —  confirm weld count with supplier` });
   return {
     density, volIn3: Math.round(volIn3),
@@ -87,7 +90,6 @@ function calcSheet({ alloy, thickness, width, length, qty }) {
   if (!t || !w || !l || !q || t <= 0 || w <= 0 || l <= 0 || q <= 0) return null;
   const wtPerPc  = l * w * t * density;
   const totalWt  = wtPerPc * q;
-  // Interleave: standard kraft paper ~0.004" per sheet (industry standard for Al sheet/plate)
   const stackThk = q * t + Math.max(0, q - 1) * 0.004;
   const dunnage  = 1.0;
   const skidH    = 5.5;
@@ -95,17 +97,12 @@ function calcSheet({ alloy, thickness, width, length, qty }) {
   const skidLen  = l + 4;
   const skidWid  = w + 4;
   const prodType = getProductType(t);
-  // else-if per category — only the highest-severity condition fires for each concern
   const flags = [];
-  // Product classification
   if (prodType === "PLATE") flags.push({ level: "info", msg: `Plate classification (≥ .250")  —  edge/corner protection recommended in transit` });
-  // Individual piece weight
   if (wtPerPc > 500)       flags.push({ level: "warn",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  —  mechanical handling required` });
   else if (wtPerPc > 300)  flags.push({ level: "info",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  —  mechanical assist recommended` });
-  // Bundle total weight
   if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  —  heavy-lift equipment required` });
   else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  —  verify forklift capacity` });
-  // Length / skid length
   if (skidLen > 240) flags.push({ level: "danger", msg: `Skid length ${skidLen}"  —  flatbed or specialized freight likely required` });
   else if (l > 192)  flags.push({ level: "warn",   msg: `Sheet length ${l}"  —  verify dock/trailer clearance for unloading` });
   return {
@@ -141,7 +138,6 @@ function CoilDetail({ result, inputs }) {
 
   return (
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
-      {/* Dark header — matches ICC section header style */}
       <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
           Shipping Dimensions — Coil
@@ -155,10 +151,7 @@ function CoilDetail({ result, inputs }) {
       </div>
 
       <div className="p-5">
-        {/* 4-column metric grid — matches ICC renderDetailCard exactly */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-
-          {/* Coil Geometry */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Coil Geometry</p>
             <p className="text-sm font-medium text-neutral-600">Outer Diameter</p>
@@ -171,7 +164,6 @@ function CoilDetail({ result, inputs }) {
             </div>
           </div>
 
-          {/* Skid Footprint */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
             <p className="text-sm font-medium text-neutral-600">Skid Length (axis)</p>
@@ -182,7 +174,6 @@ function CoilDetail({ result, inputs }) {
             <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Skid Height:</span> <span className="font-bold">{result.skidH}"</span></p>
           </div>
 
-          {/* Stack Height */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Total Stack Height</p>
             <p className="text-3xl font-extrabold text-neutral-900">{result.totalH}"</p>
@@ -203,7 +194,6 @@ function CoilDetail({ result, inputs }) {
             </div>
           </div>
 
-          {/* Freight Profile — amber card matches ICC skid/amber card */}
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.skidWid}"</span></p>
@@ -217,12 +207,10 @@ function CoilDetail({ result, inputs }) {
           </div>
         </div>
 
-        {/* Flags */}
         {result.flags.length > 0 && (
           <div className="mb-4">{result.flags.map((f, i) => <FlagBanner key={i} flag={f} />)}</div>
         )}
 
-        {/* Summary bar — matches ICC dark summary bar exactly */}
         <div className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white p-4 rounded-xl font-bold text-sm shadow-lg">
           <p className="flex items-center gap-2 flex-wrap">
             <span className="text-neutral-400">⬡</span>
@@ -245,7 +233,6 @@ function SheetDetail({ result, inputs }) {
 
   return (
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
-      {/* Dark header */}
       <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
           Shipping Dimensions — {result.prodType}
@@ -259,10 +246,7 @@ function SheetDetail({ result, inputs }) {
       </div>
 
       <div className="p-5">
-        {/* 4-column metric grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-
-          {/* Piece / Bundle */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Piece / Bundle</p>
             <p className="text-sm font-medium text-neutral-600">Weight / Piece</p>
@@ -274,7 +258,6 @@ function SheetDetail({ result, inputs }) {
             </div>
           </div>
 
-          {/* Stack Profile */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Stack Profile</p>
             <p className="text-3xl font-extrabold text-neutral-900">{result.totalH}"</p>
@@ -299,7 +282,6 @@ function SheetDetail({ result, inputs }) {
             </div>
           </div>
 
-          {/* Skid Footprint */}
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
             <p className="text-sm font-medium text-neutral-600">Skid Length</p>
@@ -310,7 +292,6 @@ function SheetDetail({ result, inputs }) {
             <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Skid Height:</span> <span className="font-bold">{result.skidH}"</span></p>
           </div>
 
-          {/* Freight Profile */}
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.skidWid}"</span></p>
@@ -324,12 +305,10 @@ function SheetDetail({ result, inputs }) {
           </div>
         </div>
 
-        {/* Flags */}
         {result.flags.length > 0 && (
           <div className="mb-4">{result.flags.map((f, i) => <FlagBanner key={i} flag={f} />)}</div>
         )}
 
-        {/* Summary bar */}
         <div className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white p-4 rounded-xl font-bold text-sm shadow-lg">
           <p className="flex items-center gap-2 flex-wrap">
             <span className="text-neutral-400">📋</span>
@@ -344,7 +323,7 @@ function SheetDetail({ result, inputs }) {
   );
 }
 
-// ── TECH REFERENCE (collapsed by default like ICC) ────────────────────────────
+// ── TECH REFERENCE ────────────────────────────────────────────────────────────
 function TechRef() {
   const [collapsed, setCollapsed] = useState(true);
   return (
@@ -361,7 +340,6 @@ function TechRef() {
       {!collapsed && (
         <div className="p-5">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
-            {/* Alloy density table */}
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Alloy Densities (lb/in³)</p>
               <div className="space-y-1">
@@ -373,7 +351,6 @@ function TechRef() {
                 ))}
               </div>
             </div>
-            {/* Coil formulas */}
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Coil Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
@@ -386,7 +363,6 @@ function TechRef() {
                 </p>
               </div>
             </div>
-            {/* Sheet formulas */}
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Sheet / Plate Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
@@ -408,22 +384,65 @@ function TechRef() {
 // ── ROOT ──────────────────────────────────────────────────────────────────────
 export default function ShippingCalc() {
   const [mode, setMode] = useState("coil");
-  const [coilIn,    setCoilIn]    = useState({ alloy: "3003", thickness: "", width: "", weight: "", coreId: "20" });
+
+  const [coilIn, setCoilIn] = useState({
+    alloy: "5052", thickness: "", width: "", weight: "", coreId: "20",
+  });
   const [coilResult, setCoilResult] = useState(null);
-  const [sheetIn,   setSheetIn]   = useState({ alloy: "3003", thickness: "", width: "", length: "", qty: "" });
+
+  // totalWt is the input-form lbs field, kept in sync with qty
+  const [sheetIn, setSheetIn] = useState({
+    alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "",
+  });
   const [sheetResult, setSheetResult] = useState(null);
 
+  // ── Sheet field updater — keeps qty ↔ totalWt in sync ──────────────────────
+  // `prioritize`: when both qty and totalWt exist, which one was just changed?
+  const updateSheet = (key, val) => {
+    setSheetIn(prev => {
+      const next = { ...prev, [key]: val };
+      const wtPerPc = computeWtPerPc(next);
+
+      if (wtPerPc && wtPerPc > 0) {
+        if (key === "qty") {
+          // User edited qty → recompute totalWt
+          const q = parseInt(val);
+          next.totalWt = q > 0 ? (q * wtPerPc).toFixed(1) : "";
+        } else if (key === "totalWt") {
+          // User edited totalWt → recompute qty
+          const lbs = parseFloat(val);
+          next.qty = lbs > 0 ? String(Math.round(lbs / wtPerPc)) : "";
+        } else {
+          // Dimension changed — recalculate whichever quantity field is populated
+          // Prefer qty as source of truth if both are set; otherwise use whichever exists
+          if (next.qty && parseInt(next.qty) > 0) {
+            next.totalWt = (parseInt(next.qty) * wtPerPc).toFixed(1);
+          } else if (next.totalWt && parseFloat(next.totalWt) > 0) {
+            next.qty = String(Math.round(parseFloat(next.totalWt) / wtPerPc));
+          }
+        }
+      }
+
+      return next;
+    });
+  };
+
   const setC = key => val => setCoilIn(p => ({ ...p, [key]: val }));
-  const setS = key => val => setSheetIn(p => ({ ...p, [key]: val }));
+
   const doCoilCalc  = () => setCoilResult(calcCoil(coilIn));
   const doSheetCalc = () => setSheetResult(calcSheet(sheetIn));
-  const coilKey  = e => { if (e.key === "Enter") doCoilCalc(); };
-  const sheetKey = e => { if (e.key === "Enter") doSheetCalc(); };
+  const coilKey     = e => { if (e.key === "Enter") doCoilCalc(); };
+  const sheetKey    = e => { if (e.key === "Enter") doSheetCalc(); };
+
   const handleClear = () => {
-    setCoilIn({ alloy: "3003", thickness: "", width: "", weight: "", coreId: "20" });
-    setSheetIn({ alloy: "3003", thickness: "", width: "", length: "", qty: "" });
-    setCoilResult(null); setSheetResult(null);
+    setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20" });
+    setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "" });
+    setCoilResult(null);
+    setSheetResult(null);
   };
+
+  // Per-piece weight for display hint in inputs
+  const liveWtPerPc = computeWtPerPc(sheetIn);
 
   return (
     <>
@@ -437,6 +456,12 @@ export default function ShippingCalc() {
         @keyframes pulse-glow {
           0%,100% { box-shadow: 0 0 5px rgba(220,38,38,0.3); }
           50%      { box-shadow: 0 0 20px rgba(220,38,38,0.6); }
+        }
+        .linked-field { position: relative; }
+        .linked-badge {
+          display: flex; align-items: center; justify-content: center;
+          color: #6b7280; font-size: 10px; font-weight: 700;
+          letter-spacing: 0.05em; user-select: none;
         }
       `}} />
 
@@ -468,7 +493,7 @@ export default function ShippingCalc() {
               </button>
             </div>
 
-            {/* Mode toggle — identical pattern to ICC cutting mode tabs */}
+            {/* Mode toggle */}
             <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold mb-5">
               <button
                 onClick={() => setMode("coil")}
@@ -549,10 +574,12 @@ export default function ShippingCalc() {
                 <h2 className="text-sm font-bold mb-3 text-neutral-700 uppercase tracking-wider flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-neutral-600"></span>Sheet / Plate Parameters
                 </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+
+                {/* Row 1: alloy, density, thickness, width, length */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-3">
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Alloy</label>
-                    <select value={sheetIn.alloy} onChange={e => setS("alloy")(e.target.value)}
+                    <select value={sheetIn.alloy} onChange={e => updateSheet("alloy", e.target.value)}
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium">
                       {ALLOYS.map(a => <option key={a.label} value={a.label}>{a.label}</option>)}
                     </select>
@@ -565,28 +592,73 @@ export default function ShippingCalc() {
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Thickness"</label>
                     <input type="number" step="0.001" value={sheetIn.thickness}
-                      onChange={e => setS("thickness")(e.target.value)} onKeyDown={sheetKey} placeholder="0.250"
+                      onChange={e => updateSheet("thickness", e.target.value)} onKeyDown={sheetKey} placeholder="0.250"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Width"</label>
                     <input type="number" step="0.1" value={sheetIn.width}
-                      onChange={e => setS("width")(e.target.value)} onKeyDown={sheetKey} placeholder="48"
+                      onChange={e => updateSheet("width", e.target.value)} onKeyDown={sheetKey} placeholder="48"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Length"</label>
                     <input type="number" step="0.1" value={sheetIn.length}
-                      onChange={e => setS("length")(e.target.value)} onKeyDown={sheetKey} placeholder="144"
-                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Qty (pcs)</label>
-                    <input type="number" step="1" value={sheetIn.qty}
-                      onChange={e => setS("qty")(e.target.value)} onKeyDown={sheetKey} placeholder="5"
+                      onChange={e => updateSheet("length", e.target.value)} onKeyDown={sheetKey} placeholder="144"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                 </div>
+
+                {/* Row 2: Qty ↔ Total Lbs linked pair */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-0 sm:gap-0 w-full sm:w-auto">
+                  {/* Qty field */}
+                  <div className="flex-1 sm:max-w-[160px]">
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
+                      Qty (pcs)
+                    </label>
+                    <input
+                      type="number" step="1" value={sheetIn.qty}
+                      onChange={e => updateSheet("qty", e.target.value)}
+                      onKeyDown={sheetKey} placeholder="5"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-l-lg rounded-r-none focus:ring-2 focus:ring-red-500 bg-white font-medium border-r-0 sm:border-r-0"
+                      style={{ borderRadius: "0.5rem 0 0 0.5rem" }}
+                    />
+                  </div>
+
+                  {/* Link badge */}
+                  <div className="flex items-end">
+                    <div
+                      className="flex flex-col items-center justify-center px-2.5 bg-neutral-200 border-y border-neutral-300 text-neutral-500 font-bold"
+                      style={{ height: "38px", fontSize: "11px", lineHeight: 1, minWidth: "36px" }}
+                    >
+                      <span style={{ fontSize: "13px", lineHeight: 1 }}>⇄</span>
+                      <span style={{ fontSize: "9px", marginTop: "2px", letterSpacing: "0.04em" }}>OR</span>
+                    </div>
+                  </div>
+
+                  {/* Total Lbs field */}
+                  <div className="flex-1 sm:max-w-[180px]">
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
+                      Total Weight (lbs)
+                      {liveWtPerPc && (
+                        <span className="ml-2 text-neutral-400 font-normal normal-case">
+                          {fmtN(liveWtPerPc, 2)} lbs/pc
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      type="number" step="1" value={sheetIn.totalWt}
+                      onChange={e => updateSheet("totalWt", e.target.value)}
+                      onKeyDown={sheetKey} placeholder="e.g. 3500"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 focus:ring-2 focus:ring-red-500 bg-white font-medium border-l-0"
+                      style={{ borderRadius: "0 0.5rem 0.5rem 0" }}
+                    />
+                  </div>
+
+                  {/* spacer so the row doesn't stretch full-width on desktop */}
+                  <div className="hidden sm:block flex-1" />
+                </div>
+
                 <div className="mt-4 flex items-center gap-3">
                   <button onClick={doSheetCalc}
                     className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
