@@ -129,26 +129,43 @@ function calcExtrusion({ alloy, lbPerFt, length, qty, bundleW, bundleH }) {
   const wtPerPc  = lpf * Lft;
   const totalWt  = wtPerPc * q;
   const lengthIn = Lft * 12;
-  const bundW    = bw && bw > 0 ? bw : 12;   // banded bundle cross-section (default)
-  const bundH    = bh && bh > 0 ? bh : 12;
-  const bunkH    = 4;                          // dunnage / bunks under the bundle
+  const xArea    = lpf / (density * 12);       // cross-sectional metal area, in² per pc
+
+  // Bundle cross-section. Weight per ft only gives the metal area of one piece, not
+  // the profile's outer W x H, so a true footprint needs the banded bundle size.
+  // If either dimension is left blank, estimate it from the bundle's total metal
+  // area and a typical banded packing efficiency (extrusions bundle loose, with
+  // voids). The estimate scales with qty and profile size, then the user can refine.
+  const PACK_EFF    = 0.35;                     // ~35% of the bundle envelope is metal
+  const envelopeIn2 = (q * xArea) / PACK_EFF;   // estimated bundle bounding-box area
+  const haveW = bw && bw > 0;
+  const haveH = bh && bh > 0;
+  let bundW, bundH, estW = false, estH = false;
+  if (haveW && haveH)      { bundW = bw; bundH = bh; }
+  else if (haveW)          { bundW = bw; bundH = envelopeIn2 / bw; estH = true; }
+  else if (haveH)          { bundH = bh; bundW = envelopeIn2 / bh; estW = true; }
+  else                     { bundW = bundH = Math.sqrt(envelopeIn2); estW = estH = true; } // square bundle
+  const estimated = estW || estH;
+
+  const bunkH    = 4;                           // dunnage / bunks under the bundle
   const totalH   = bundH + bunkH;
-  const skidLen  = lengthIn;                   // bunks span the load length
+  const skidLen  = lengthIn;                    // bunks span the load length
   const footW    = bundW;
-  const xArea    = lpf / (density * 12);       // derived cross-sectional area, in²
+
   const flags = [];
   if (lengthIn > 288)      flags.push({ level: "warn", msg: `Stock length ${fmtN(Lft, 0)} ft (${lengthIn}")  -  flatbed or 53' trailer required; verify overhang and side-load access` });
   else if (lengthIn > 240) flags.push({ level: "info", msg: `Long stock ${fmtN(Lft, 0)} ft  -  confirm trailer length and dock clearance for unloading` });
   if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  -  heavy-lift equipment required` });
   else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  -  verify forklift capacity` });
   if (wtPerPc > 300)       flags.push({ level: "info", msg: `Heavy single length ${fmtN(wtPerPc, 0)} lbs/pc  -  mechanical handling recommended` });
-  if (!bw || bw <= 0 || !bh || bh <= 0)
-    flags.push({ level: "info", msg: `Bundle cross-section defaulted to ${bundW}" x ${bundH}"  -  enter actual banded bundle size for accurate freight footprint` });
+  if (estimated)           flags.push({ level: "info", msg: `Bundle cross-section ESTIMATED at ${fmtN(bundW, 0)}" x ${fmtN(bundH, 0)}" from ${q} pcs of ${xArea.toFixed(3)} in metal at ${Math.round(PACK_EFF * 100)}% packing  -  weight per ft does not carry the profile shape, so enter the actual banded W x H for an exact footprint` });
+
   return {
     density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
-    lengthIn, lengthFt: Lft, bundW, bundH, bunkH, totalH: totalH.toFixed(1),
-    skidLen: skidLen.toFixed(0), footW, xArea: xArea.toFixed(3),
-    prodType: "EXTRUSION", flags,
+    lengthIn, lengthFt: Lft,
+    bundW: fmtN(bundW, 1), bundH: fmtN(bundH, 1), bunkH, totalH: totalH.toFixed(1),
+    skidLen: skidLen.toFixed(0), footW: fmtN(footW, 1), xArea: xArea.toFixed(3),
+    estimated, estW, estH, prodType: "EXTRUSION", flags,
   };
 }
 
@@ -405,12 +422,12 @@ function ExtrusionDetail({ result, inputs }) {
             <p className="text-xs text-neutral-400 mb-2">total stack height</p>
             <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-neutral-500">Bundle Height</span>
-                <span className="font-bold text-neutral-700">{result.bundH}"</span>
+                <span className="text-neutral-500">Bundle Height{result.estH ? " (est)" : ""}</span>
+                <span className={`font-bold ${result.estH ? "text-amber-700" : "text-neutral-700"}`}>{result.bundH}"</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-neutral-500">Bundle Width</span>
-                <span className="font-bold text-neutral-700">{result.bundW}"</span>
+                <span className="text-neutral-500">Bundle Width{result.estW ? " (est)" : ""}</span>
+                <span className={`font-bold ${result.estW ? "text-amber-700" : "text-neutral-700"}`}>{result.bundW}"</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">Bunks</span>
@@ -428,14 +445,14 @@ function ExtrusionDetail({ result, inputs }) {
             <p className="text-sm font-medium text-neutral-600">Bunk Length</p>
             <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}"</p>
             <p className="text-xs text-neutral-400 mb-2">spans full stock length</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Width:</span> <span className="font-bold">{result.footW}"</span></p>
-            <p className="text-xs text-neutral-400">banded cross-section</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Width:</span> <span className={`font-bold ${result.estW ? "text-amber-700" : ""}`}>{result.footW}"</span></p>
+            <p className="text-xs text-neutral-400">{result.estimated ? "estimated cross-section" : "banded cross-section"}</p>
             <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Bunk Height:</span> <span className="font-bold">{result.bunkH}"</span></p>
           </div>
 
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.footW}"</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.footW}"{result.estimated ? " est" : ""}</span></p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Height:</span> <span className="font-bold">{result.totalH}"</span></p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Wt:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
@@ -523,7 +540,7 @@ function TechRef() {
                 <p><span className="font-bold text-neutral-800">X-Sec Area:</span> Wt-per-ft / (Density x 12) — derived in²</p>
                 <p><span className="font-bold text-neutral-800">Footprint:</span> Length x Bundle Width</p>
                 <p><span className="font-bold text-neutral-800">Total H:</span> Bundle Height + 4" bunks</p>
-                <p className="mt-2 pt-2 border-t border-neutral-100">Enter the actual banded bundle cross-section (W x H); defaults to 12" x 12" if left blank.</p>
+                <p className="mt-2 pt-2 border-t border-neutral-100">Bundle W x H are optional. If blank, the bundle envelope is estimated from Qty x metal area at ~35% packing. Weight per ft does not carry the profile shape, so enter actual banded W x H for an exact footprint.</p>
               </div>
             </div>
           </div>
@@ -946,7 +963,7 @@ export default function ShippingCalc() {
                     className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
                     CALCULATE ▸
                   </button>
-                  <p className="text-xs text-neutral-400">enter weight per foot from the order; or press Enter</p>
+                  <p className="text-xs text-neutral-400">weight/ft from the order. Bundle W x H optional - estimated from piece count if blank.</p>
                 </div>
               </div>
             )}
