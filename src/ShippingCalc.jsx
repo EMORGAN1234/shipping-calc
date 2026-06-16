@@ -50,6 +50,13 @@ const computeWtPerPc = s => {
   return l * w * t * density;
 };
 
+// Returns lbs/piece given an extrusion state object — null if inputs incomplete
+const computeExtWtPerPc = s => {
+  const lpf = parseFloat(s.lbPerFt), Lft = parseFloat(s.length);
+  if (!lpf || !Lft || lpf <= 0 || Lft <= 0) return null;
+  return lpf * Lft;
+};
+
 // ── CALC: COIL ────────────────────────────────────────────────────────────────
 function calcCoil({ alloy, thickness, width, weight, coreId }) {
   const density = getDensity(alloy);
@@ -110,6 +117,38 @@ function calcSheet({ alloy, thickness, width, length, qty }) {
     stackThk: stackThk.toFixed(3), totalH: totalH.toFixed(1),
     skidLen: skidLen.toFixed(0), skidWid: skidWid.toFixed(0),
     skidH, prodType, flags,
+  };
+}
+
+// ── CALC: EXTRUSION ───────────────────────────────────────────────────────────
+function calcExtrusion({ alloy, lbPerFt, length, qty, bundleW, bundleH }) {
+  const density = getDensity(alloy);
+  const lpf = parseFloat(lbPerFt), Lft = parseFloat(length), q = parseInt(qty);
+  const bw  = parseFloat(bundleW), bh = parseFloat(bundleH);
+  if (!lpf || !Lft || !q || lpf <= 0 || Lft <= 0 || q <= 0) return null;
+  const wtPerPc  = lpf * Lft;
+  const totalWt  = wtPerPc * q;
+  const lengthIn = Lft * 12;
+  const bundW    = bw && bw > 0 ? bw : 12;   // banded bundle cross-section (default)
+  const bundH    = bh && bh > 0 ? bh : 12;
+  const bunkH    = 4;                          // dunnage / bunks under the bundle
+  const totalH   = bundH + bunkH;
+  const skidLen  = lengthIn;                   // bunks span the load length
+  const footW    = bundW;
+  const xArea    = lpf / (density * 12);       // derived cross-sectional area, in²
+  const flags = [];
+  if (lengthIn > 288)      flags.push({ level: "warn", msg: `Stock length ${fmtN(Lft, 0)} ft (${lengthIn}")  -  flatbed or 53' trailer required; verify overhang and side-load access` });
+  else if (lengthIn > 240) flags.push({ level: "info", msg: `Long stock ${fmtN(Lft, 0)} ft  -  confirm trailer length and dock clearance for unloading` });
+  if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  -  heavy-lift equipment required` });
+  else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  -  verify forklift capacity` });
+  if (wtPerPc > 300)       flags.push({ level: "info", msg: `Heavy single length ${fmtN(wtPerPc, 0)} lbs/pc  -  mechanical handling recommended` });
+  if (!bw || bw <= 0 || !bh || bh <= 0)
+    flags.push({ level: "info", msg: `Bundle cross-section defaulted to ${bundW}" x ${bundH}"  -  enter actual banded bundle size for accurate freight footprint` });
+  return {
+    density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
+    lengthIn, lengthFt: Lft, bundW, bundH, bunkH, totalH: totalH.toFixed(1),
+    skidLen: skidLen.toFixed(0), footW, xArea: xArea.toFixed(3),
+    prodType: "EXTRUSION", flags,
   };
 }
 
@@ -325,6 +364,106 @@ function SheetDetail({ result, inputs }) {
   );
 }
 
+// ── EXTRUSION DETAIL CARD ─────────────────────────────────────────────────────
+function ExtrusionDetail({ result, inputs }) {
+  const q       = parseInt(inputs.qty);
+  const lenIn   = result.lengthIn;
+  const lenOk   = lenIn <= 240;
+  const lenWarn = lenIn > 240 && lenIn <= 288;
+
+  return (
+    <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
+        <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
+          Shipping Dimensions — Extrusion
+          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-neutral-600 text-white border border-neutral-500">
+            {result.prodType}
+          </span>
+        </h2>
+        <p className="text-xs text-neutral-400 mt-0.5">
+          {inputs.alloy} @ {inputs.lbPerFt} lb/ft | {fmtN(result.lengthFt, 0)} ft lengths | {q} {q === 1 ? "pc" : "pcs"} | X-sec: {result.xArea} in² | Density: {result.density} lb/in³
+        </p>
+      </div>
+
+      <div className="p-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+
+          <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
+            <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Piece / Bundle</p>
+            <p className="text-sm font-medium text-neutral-600">Weight / Piece</p>
+            <p className="text-2xl font-extrabold text-neutral-900">{parseFloat(result.wtPerPc).toLocaleString()} lbs</p>
+            <div className="mt-2 pt-2 border-t border-neutral-200 space-y-0.5">
+              <p className="text-sm"><span className="font-medium text-neutral-600">Length:</span> <span className="font-bold">{fmtN(result.lengthFt, 0)} ft ({result.lengthIn.toLocaleString()}")</span></p>
+              <p className="text-sm"><span className="font-medium text-neutral-600">Qty:</span> <span className="font-bold">{q.toLocaleString()} pcs</span></p>
+              <p className="text-sm"><span className="font-medium text-neutral-600">Total Weight:</span> <span className="font-bold text-red-700">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
+            <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Bundle / Stack</p>
+            <p className="text-3xl font-extrabold text-neutral-900">{result.totalH}"</p>
+            <p className="text-xs text-neutral-400 mb-2">total stack height</p>
+            <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Bundle Height</span>
+                <span className="font-bold text-neutral-700">{result.bundH}"</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Bundle Width</span>
+                <span className="font-bold text-neutral-700">{result.bundW}"</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-neutral-500">Bunks</span>
+                <span className="font-bold text-neutral-700">{result.bunkH}"</span>
+              </div>
+              <div className="flex justify-between border-t border-neutral-200 pt-1">
+                <span className="font-bold text-neutral-800">= Total H</span>
+                <span className="font-bold text-red-700">{result.totalH}"</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
+            <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
+            <p className="text-sm font-medium text-neutral-600">Bunk Length</p>
+            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}"</p>
+            <p className="text-xs text-neutral-400 mb-2">spans full stock length</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Width:</span> <span className="font-bold">{result.footW}"</span></p>
+            <p className="text-xs text-neutral-400">banded cross-section</p>
+            <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Bunk Height:</span> <span className="font-bold">{result.bunkH}"</span></p>
+          </div>
+
+          <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
+            <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.footW}"</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Height:</span> <span className="font-bold">{result.totalH}"</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Wt:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
+            <div className="mt-2 pt-2 border-t border-amber-200">
+              <p className={`text-xs font-semibold ${lenOk ? "text-green-700" : lenWarn ? "text-amber-700" : "text-red-700"}`}>
+                {lenOk ? "✓ Standard trailer length" : lenWarn ? "⚠ Long load — verify trailer" : "⛔ Oversized — flatbed / special"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {result.flags.length > 0 && (
+          <div className="mb-4">{result.flags.map((f, i) => <FlagBanner key={i} flag={f} />)}</div>
+        )}
+
+        <div className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white p-4 rounded-xl font-bold text-sm shadow-lg">
+          <p className="flex items-center gap-2 flex-wrap">
+            <span className="text-neutral-400">⫼</span>
+            {inputs.alloy} @ {inputs.lbPerFt} lb/ft | {fmtN(result.lengthFt, 0)} ft × {q} pcs |
+            {parseFloat(result.totalWt).toLocaleString()} lbs |
+            Bundle: {result.skidLen}" L × {result.footW}" W |
+            <span className="text-amber-400">Total Height: {result.totalH}"</span>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── TECH REFERENCE ────────────────────────────────────────────────────────────
 function TechRef() {
   const [collapsed, setCollapsed] = useState(true);
@@ -341,7 +480,7 @@ function TechRef() {
       </div>
       {!collapsed && (
         <div className="p-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-sm">
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Alloy Densities (lb/in³)</p>
               <div className="space-y-1">
@@ -376,6 +515,17 @@ function TechRef() {
                 <p className="mt-2 pt-2 border-t border-neutral-100">Plate &gt;= .250" per ASTM B209. Sheet &lt;= .249".</p>
               </div>
             </div>
+            <div>
+              <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Extrusion Geometry</p>
+              <div className="space-y-2 text-xs text-neutral-600">
+                <p><span className="font-bold text-neutral-800">Wt/Pc:</span> Wt-per-ft x Length(ft)</p>
+                <p><span className="font-bold text-neutral-800">Total Wt:</span> Wt/Pc x Qty</p>
+                <p><span className="font-bold text-neutral-800">X-Sec Area:</span> Wt-per-ft / (Density x 12) — derived in²</p>
+                <p><span className="font-bold text-neutral-800">Footprint:</span> Length x Bundle Width</p>
+                <p><span className="font-bold text-neutral-800">Total H:</span> Bundle Height + 4" bunks</p>
+                <p className="mt-2 pt-2 border-t border-neutral-100">Enter the actual banded bundle cross-section (W x H); defaults to 12" x 12" if left blank.</p>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -396,6 +546,11 @@ export default function ShippingCalc() {
     alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "",
   });
   const [sheetResult, setSheetResult] = useState(null);
+
+  const [extIn, setExtIn] = useState({
+    alloy: "6063", lbPerFt: "", length: "", qty: "", totalWt: "", bundleW: "", bundleH: "",
+  });
+  const [extResult, setExtResult] = useState(null);
 
   // ── Sheet field updater — keeps qty and totalWt in sync ────────────────────
   const updateSheet = (key, val) => {
@@ -424,21 +579,58 @@ export default function ShippingCalc() {
     });
   };
 
+  // ── Extrusion field updater — keeps qty and totalWt in sync ─────────────────
+  const updateExt = (key, val) => {
+    setExtIn(prev => {
+      const next = { ...prev, [key]: val };
+      const wtPerPc = computeExtWtPerPc(next);
+
+      if (wtPerPc && wtPerPc > 0) {
+        if (key === "qty") {
+          const q = parseInt(val);
+          next.totalWt = q > 0 ? (q * wtPerPc).toFixed(1) : "";
+        } else if (key === "totalWt") {
+          const lbs = parseFloat(val);
+          next.qty = lbs > 0 ? String(Math.round(lbs / wtPerPc)) : "";
+        } else if (key === "lbPerFt" || key === "length") {
+          // Driver changed — qty takes priority as source of truth
+          if (next.qty && parseInt(next.qty) > 0) {
+            next.totalWt = (parseInt(next.qty) * wtPerPc).toFixed(1);
+          } else if (next.totalWt && parseFloat(next.totalWt) > 0) {
+            next.qty = String(Math.round(parseFloat(next.totalWt) / wtPerPc));
+          }
+        }
+      }
+
+      return next;
+    });
+  };
+
   const setC = key => val => setCoilIn(p => ({ ...p, [key]: val }));
 
   const doCoilCalc  = () => setCoilResult(calcCoil(coilIn));
   const doSheetCalc = () => setSheetResult(calcSheet(sheetIn));
+  const doExtCalc   = () => setExtResult(calcExtrusion(extIn));
   const coilKey     = e => { if (e.key === "Enter") doCoilCalc(); };
   const sheetKey    = e => { if (e.key === "Enter") doSheetCalc(); };
+  const extKey      = e => { if (e.key === "Enter") doExtCalc(); };
 
   const handleClear = () => {
     setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20" });
     setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "" });
+    setExtIn({ alloy: "6063", lbPerFt: "", length: "", qty: "", totalWt: "", bundleW: "", bundleH: "" });
     setCoilResult(null);
     setSheetResult(null);
+    setExtResult(null);
   };
 
-  const liveWtPerPc = computeWtPerPc(sheetIn);
+  const liveWtPerPc    = computeWtPerPc(sheetIn);
+  const liveExtWtPerPc = computeExtWtPerPc(extIn);
+  const liveExtArea    = (() => {
+    const lpf = parseFloat(extIn.lbPerFt), d = getDensity(extIn.alloy);
+    if (!lpf || lpf <= 0) return null;
+    return lpf / (d * 12);
+  })();
 
   return (
     <>
@@ -472,7 +664,7 @@ export default function ShippingCalc() {
                   <h1 className="text-2xl sm:text-3xl font-extrabold text-neutral-900 tracking-tight">
                     Shipping Dimensions Calculator
                   </h1>
-                  <p className="text-sm text-neutral-500 font-medium">Coil · Sheet · Plate</p>
+                  <p className="text-sm text-neutral-500 font-medium">Coil · Sheet · Plate · Extrusion</p>
                 </div>
               </div>
               <button
@@ -491,8 +683,12 @@ export default function ShippingCalc() {
               >COIL</button>
               <button
                 onClick={() => setMode("sheet")}
-                className={`px-6 py-2.5 transition-colors ${mode === "sheet" ? "bg-red-600 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}
+                className={`px-6 py-2.5 transition-colors border-l border-neutral-300 ${mode === "sheet" ? "bg-red-600 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}
               >SHEET / PLATE</button>
+              <button
+                onClick={() => setMode("ext")}
+                className={`px-6 py-2.5 transition-colors border-l border-neutral-300 ${mode === "ext" ? "bg-red-700 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}
+              >EXTRUSION</button>
             </div>
 
             {/* ── COIL INPUTS ── */}
@@ -650,11 +846,117 @@ export default function ShippingCalc() {
               </div>
             )}
 
+            {/* ── EXTRUSION INPUTS ── */}
+            {mode === "ext" && (
+              <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 rounded-xl p-4 border border-neutral-200">
+                <h2 className="text-sm font-bold mb-3 text-neutral-700 uppercase tracking-wider flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-700"></span>Extrusion Parameters
+                </h2>
+
+                {/* Row 1: alloy, density, wt/ft, length, bundle W, bundle H */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Alloy</label>
+                    <select value={extIn.alloy} onChange={e => updateExt("alloy", e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium">
+                      {ALLOYS.map(a => <option key={a.label} value={a.label}>{a.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-500">Density</label>
+                    <input readOnly value={getDensity(extIn.alloy)}
+                      className="w-full px-3 py-2 text-sm border-2 border-neutral-400 rounded-lg bg-neutral-100 font-bold text-neutral-800 cursor-not-allowed" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
+                      Weight / ft
+                      {liveExtArea && (
+                        <span className="ml-1 text-neutral-400 font-normal normal-case">
+                          {fmtN(liveExtArea, 3)} in²
+                        </span>
+                      )}
+                    </label>
+                    <input type="number" step="0.001" value={extIn.lbPerFt}
+                      onChange={e => updateExt("lbPerFt", e.target.value)} onKeyDown={extKey} placeholder="0.750"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Length (ft)</label>
+                    <input type="number" step="0.5" value={extIn.length}
+                      onChange={e => updateExt("length", e.target.value)} onKeyDown={extKey} placeholder="20"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Bundle W"</label>
+                    <input type="number" step="0.5" value={extIn.bundleW}
+                      onChange={e => updateExt("bundleW", e.target.value)} onKeyDown={extKey} placeholder="12"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Bundle H"</label>
+                    <input type="number" step="0.5" value={extIn.bundleH}
+                      onChange={e => updateExt("bundleH", e.target.value)} onKeyDown={extKey} placeholder="12"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                </div>
+
+                {/* Row 2: Qty and Total Lbs linked pair */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-0 sm:gap-0 w-full sm:w-auto">
+                  <div className="flex-1 sm:max-w-[160px]">
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Qty (pcs)</label>
+                    <input
+                      type="number" step="1" value={extIn.qty}
+                      onChange={e => updateExt("qty", e.target.value)}
+                      onKeyDown={extKey} placeholder="100"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 focus:ring-2 focus:ring-red-500 bg-white font-medium border-r-0"
+                      style={{ borderRadius: "0.5rem 0 0 0.5rem" }}
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <div
+                      className="flex flex-col items-center justify-center px-2.5 bg-neutral-200 border-y border-neutral-300 text-neutral-500 font-bold"
+                      style={{ height: "38px", fontSize: "11px", lineHeight: 1, minWidth: "36px" }}
+                    >
+                      <span style={{ fontSize: "13px", lineHeight: 1 }}>⇄</span>
+                      <span style={{ fontSize: "9px", marginTop: "2px", letterSpacing: "0.04em" }}>OR</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 sm:max-w-[200px]">
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
+                      Total Weight (lbs)
+                      {liveExtWtPerPc && (
+                        <span className="ml-2 text-neutral-400 font-normal normal-case">
+                          {fmtN(liveExtWtPerPc, 2)} lbs/pc
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      type="number" step="1" value={extIn.totalWt}
+                      onChange={e => updateExt("totalWt", e.target.value)}
+                      onKeyDown={extKey} placeholder="e.g. 1500"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 focus:ring-2 focus:ring-red-500 bg-white font-medium border-l-0"
+                      style={{ borderRadius: "0 0.5rem 0.5rem 0" }}
+                    />
+                  </div>
+                  <div className="hidden sm:block flex-1" />
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
+                  <button onClick={doExtCalc}
+                    className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
+                    CALCULATE ▸
+                  </button>
+                  <p className="text-xs text-neutral-400">enter weight per foot from the order; or press Enter</p>
+                </div>
+              </div>
+            )}
+
           </div>{/* end glass-card */}
 
           {/* ── RESULT DETAIL CARDS ── */}
-          {mode === "coil"  && coilResult  && !coilResult.error  && <CoilDetail  result={coilResult}  inputs={coilIn}  />}
-          {mode === "sheet" && sheetResult && <SheetDetail result={sheetResult} inputs={sheetIn} />}
+          {mode === "coil"  && coilResult  && !coilResult.error  && <CoilDetail      result={coilResult}  inputs={coilIn}  />}
+          {mode === "sheet" && sheetResult && <SheetDetail      result={sheetResult} inputs={sheetIn} />}
+          {mode === "ext"   && extResult   && <ExtrusionDetail  result={extResult}   inputs={extIn}   />}
 
           {/* ── TECHNICAL REFERENCE ── */}
           <TechRef />
