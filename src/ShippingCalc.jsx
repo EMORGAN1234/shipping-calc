@@ -174,21 +174,59 @@ const computeExtWtPerPc = s => {
   return prof.lbPerFt * Lft;
 };
 
-// ── CALC: COIL ────────────────────────────────────────────────────────────────
-function calcCoil({ alloy, thickness, width, weight, coreId, coilsPerSkid, stackOrient }) {
+// ── COIL GEOMETRY ─────────────────────────────────────────────────────────────
+// Single-coil geometry, shared by the live preview and the full calc.
+function coilGeom({ alloy, thickness, width, weight, coreId }) {
   const density = getDensity(alloy);
   const t = parseFloat(thickness), w = parseFloat(width);
   const lbs = parseFloat(weight), id = parseFloat(coreId);
   if (!t || !w || !lbs || !id || t <= 0 || w <= 0 || lbs <= 0 || id <= 0) return null;
-  let N = parseInt(coilsPerSkid);
-  if (!N || N < 1) N = 1;
-  const orient = stackOrient === "sky" ? "sky" : "side";
-
   const volIn3   = lbs / density;
   const lengthIn = volIn3 / (t * w);
   const lengthFt = lengthIn / 12;
   const od       = Math.sqrt((4 * lengthIn * t) / Math.PI + id * id);
   if (od <= id) return { error: "Calculated OD <= Core ID - check gauge, width, or weight." };
+  return { density, volIn3, lengthIn, lengthFt, od, w, lbs, id };
+}
+
+// ── COIL COUNT PER SKID ───────────────────────────────────────────────────────
+// Manual mode: use the entered count. Auto mode: fit as many coils as the skid
+// weight cap allows AND the space dimension that grows with each coil — row
+// length when eye-to-side (coils lined up side by side), stack height when
+// eye-to-sky (coils laid flat on top of each other). The smaller wins.
+function coilCount(coilIn, geom) {
+  const orient = coilIn.stackOrient === "sky" ? "sky" : "side";
+  if (!coilIn.autoCoils) {
+    let n = parseInt(coilIn.coilsPerSkid);
+    if (!n || n < 1) n = 1;
+    return { n, orient, limit: null };
+  }
+  const w = geom.w, lbs = geom.lbs;
+  const maxWt = parseFloat(coilIn.maxSkidWt) || 0;
+  const byWt  = (maxWt > 0 && lbs > 0) ? Math.floor(maxWt / lbs) : 9999;
+  let byDim = 9999;
+  const dimName = orient === "sky" ? "height" : "row length";
+  if (orient === "sky") {
+    const maxH = parseFloat(coilIn.maxStackH) || 0;
+    if (maxH > 0 && w > 0) byDim = Math.floor((maxH - 6) / w);
+  } else {
+    const maxLen = parseFloat(coilIn.maxRowLen) || 0;
+    if (maxLen > 0 && w > 0) byDim = Math.floor((maxLen - 4) / w);
+  }
+  const n = Math.max(1, Math.min(byWt, byDim));
+  const limit = byWt <= byDim ? "weight" : dimName;
+  return { n, orient, limit, byWt, byDim };
+}
+
+// ── CALC: COIL ────────────────────────────────────────────────────────────────
+function calcCoil(coilIn) {
+  const geom = coilGeom(coilIn);
+  if (!geom) return null;
+  if (geom.error) return { error: geom.error };
+  const { density, volIn3, lengthIn, lengthFt, od, w } = geom;
+  const lbs = geom.lbs;
+  const t = parseFloat(coilIn.thickness);
+  const { n: N, orient, limit } = coilCount(coilIn, geom);
 
   const skidH = 6;
   let footLen, footWid, totalH;
@@ -209,6 +247,11 @@ function calcCoil({ alloy, thickness, width, weight, coreId, coilsPerSkid, stack
   const prodType  = getProductType(t);
 
   const flags = [];
+  if (coilIn.autoCoils) {
+    const cap = (parseFloat(coilIn.maxSkidWt) || 0).toLocaleString();
+    const limLbl = limit === "weight" ? `weight-limited at ${cap} lbs/skid` : `${limit}-limited`;
+    flags.push({ level: "info", msg: `Auto-fit ${N} coil${N === 1 ? "" : "s"} per skid (${limLbl})  -  change the skid weight cap or switch to manual to override` });
+  }
   if (od > 72)      flags.push({ level: "warn", msg: `OD ${fmtN(od)}" exceeds 72"  -  verify skid/saddle load rating and coil handling equipment` });
   else if (od > 60) flags.push({ level: "info", msg: `Large OD (${fmtN(od)}")  -  confirm saddle and handling equipment are rated for this diameter` });
   if (totalH > 96)      flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  -  specialized freight or open-top trailer may be required` });
@@ -223,7 +266,7 @@ function calcCoil({ alloy, thickness, width, weight, coreId, coilsPerSkid, stack
   return {
     density, volIn3: Math.round(volIn3),
     lengthIn: Math.round(lengthIn), lengthFt: Math.round(lengthFt),
-    od: fmtN(od), odNum: od, orient, N, width: w,
+    od: fmtN(od), odNum: od, orient, N, width: w, autoCoils: !!coilIn.autoCoils, limit,
     footLen: fmtN(footLen), footWid: fmtN(footWid, 0), skidH,
     totalH: fmtN(totalH), totalHNum: totalH,
     perCoilWt, bundleWt, prodType, flags,
@@ -702,6 +745,7 @@ export default function ShippingCalc() {
   const [coilIn, setCoilIn] = useState({
     alloy: "5052", thickness: "", width: "", weight: "", coreId: "20",
     coilsPerSkid: "1", stackOrient: "side",
+    autoCoils: true, maxSkidWt: "5000", maxStackH: "72", maxRowLen: "96",
   });
   const [coilResult, setCoilResult] = useState(null);
 
@@ -792,7 +836,7 @@ export default function ShippingCalc() {
   const extKey      = e => { if (e.key === "Enter") doExtCalc(); };
 
   const handleClear = () => {
-    setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20", coilsPerSkid: "1", stackOrient: "side" });
+    setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20", coilsPerSkid: "1", stackOrient: "side", autoCoils: true, maxSkidWt: "5000", maxStackH: "72", maxRowLen: "96" });
     setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "" });
     setExtIn({
       alloy: "6063", shape: "round_bar",
@@ -807,6 +851,9 @@ export default function ShippingCalc() {
   };
 
   const liveWtPerPc    = computeWtPerPc(sheetIn);
+  const liveCoilGeom   = coilGeom(coilIn);
+  const liveCoilCount  = (liveCoilGeom && !liveCoilGeom.error) ? coilCount(coilIn, liveCoilGeom) : null;
+  const coilNarrow     = parseFloat(coilIn.width) > 0 && parseFloat(coilIn.coreId) > 0 && parseFloat(coilIn.width) < parseFloat(coilIn.coreId);
   const liveExtWtPerPc = computeExtWtPerPc(extIn);
   const liveExtProfile = extProfile(extIn, getDensity(extIn.alloy));
   const extShapeCfg    = getShapeCfg(extIn.shape);
@@ -919,13 +966,30 @@ export default function ShippingCalc() {
                 </div>
 
                 {/* Stacking controls */}
-                <div className="mt-3 flex flex-col sm:flex-row sm:items-end gap-3">
-                  <div className="sm:max-w-[140px]">
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Coils / Skid</label>
-                    <input type="number" step="1" min="1" value={coilIn.coilsPerSkid}
-                      onChange={e => setC("coilsPerSkid")(e.target.value)} onKeyDown={coilKey} placeholder="1"
-                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                <div className="mt-3 flex flex-wrap items-end gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Coils / Skid Mode</label>
+                    <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold">
+                      <button type="button" onClick={() => setC("autoCoils")(true)}
+                        className={`px-4 py-2 transition-colors ${coilIn.autoCoils ? "bg-red-700 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
+                        AUTO-FIT
+                      </button>
+                      <button type="button" onClick={() => setC("autoCoils")(false)}
+                        className={`px-4 py-2 transition-colors border-l border-neutral-300 ${!coilIn.autoCoils ? "bg-neutral-800 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
+                        MANUAL
+                      </button>
+                    </div>
                   </div>
+
+                  <div className="sm:max-w-[120px]">
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Coils / Skid</label>
+                    <input type="number" step="1" min="1"
+                      value={coilIn.autoCoils ? (liveCoilCount ? liveCoilCount.n : "") : coilIn.coilsPerSkid}
+                      readOnly={coilIn.autoCoils}
+                      onChange={e => setC("coilsPerSkid")(e.target.value)} onKeyDown={coilKey} placeholder="1"
+                      className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-red-500 font-medium ${coilIn.autoCoils ? "border-neutral-400 bg-neutral-100 text-neutral-800 cursor-not-allowed font-bold" : "border-neutral-300 bg-white"}`} />
+                  </div>
+
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Stacking Orientation</label>
                     <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold">
@@ -939,11 +1003,55 @@ export default function ShippingCalc() {
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-neutral-400 sm:pb-2">
-                    {coilIn.stackOrient === "sky"
-                      ? "Laid flat, stacked on top of each other. Height = coils x width."
-                      : "Stood in a saddle, lined up side by side. Height = OD."}
-                  </p>
+
+                  {coilIn.autoCoils && (
+                    <>
+                      <div className="sm:max-w-[140px]">
+                        <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Skid Wt (lbs)</label>
+                        <input type="number" step="100" value={coilIn.maxSkidWt}
+                          onChange={e => setC("maxSkidWt")(e.target.value)} onKeyDown={coilKey} placeholder="5000"
+                          className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                      </div>
+                      {coilIn.stackOrient === "sky" ? (
+                        <div className="sm:max-w-[140px]">
+                          <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Stack Ht (in)</label>
+                          <input type="number" step="1" value={coilIn.maxStackH}
+                            onChange={e => setC("maxStackH")(e.target.value)} onKeyDown={coilKey} placeholder="72"
+                            className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                        </div>
+                      ) : (
+                        <div className="sm:max-w-[140px]">
+                          <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Row Len (in)</label>
+                          <input type="number" step="1" value={coilIn.maxRowLen}
+                            onChange={e => setC("maxRowLen")(e.target.value)} onKeyDown={coilKey} placeholder="96"
+                            className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Live count hint */}
+                <div className="mt-2 text-xs">
+                  {coilNarrow && (
+                    <span className="inline-block mr-3 px-2 py-0.5 rounded-full bg-red-50 text-red-700 font-semibold border border-red-200">
+                      Narrow coil (under {coilIn.coreId}" core) - good candidate for multiple per skid
+                    </span>
+                  )}
+                  {coilIn.autoCoils && liveCoilCount && (
+                    <span className="text-neutral-500">
+                      Fits <span className="font-bold text-neutral-800">{liveCoilCount.n}</span> coil{liveCoilCount.n === 1 ? "" : "s"}/skid
+                      {" "}({liveCoilCount.limit === "weight" ? `weight cap ${(parseFloat(coilIn.maxSkidWt) || 0).toLocaleString()} lbs` : `${liveCoilCount.limit} cap`})
+                      {" "}= <span className="font-bold text-neutral-800">{(liveCoilGeom.lbs * liveCoilCount.n).toLocaleString()} lbs</span> total
+                    </span>
+                  )}
+                  {!coilIn.autoCoils && (
+                    <span className="text-neutral-400">
+                      {coilIn.stackOrient === "sky"
+                        ? "Eye to sky: coils laid flat, stacked. Height = coils x width."
+                        : "Eye to side: coils stood in a saddle, lined up side by side. Height = OD."}
+                    </span>
+                  )}
                 </div>
 
                 <div className="mt-4 flex items-center gap-3">
