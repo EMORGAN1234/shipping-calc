@@ -90,7 +90,7 @@ function calcCoil({ alloy, thickness, width, weight, coreId }) {
 }
 
 // ── CALC: SHEET / PLATE ───────────────────────────────────────────────────────
-function calcSheet({ alloy, thickness, width, length, qty, maxStackH, maxSkidWt }) {
+function calcSheet({ alloy, thickness, width, length, qty, maxStackH, maxSkidWt, deckL, deckW }) {
   const density = getDensity(alloy);
   const t = parseFloat(thickness), w = parseFloat(width);
   const l = parseFloat(length),    q = parseInt(qty);
@@ -98,45 +98,60 @@ function calcSheet({ alloy, thickness, width, length, qty, maxStackH, maxSkidWt 
   const wtPerPc  = l * w * t * density;
   const totalWt  = wtPerPc * q;
 
-  // Realistic packing: a single skid is capped by product stack height and by
-  // weight. Split the order across as many skids as needed rather than piling the
-  // whole quantity into one impossible column.
+  // Realistic packing: pieces nest multiple-per-layer across the skid deck, layers
+  // stack up to a height cap, and the skid is capped by weight. Skid count is then
+  // whichever binds first - usually weight, not a single tall column.
   const DUNNAGE = 1.0, SKID_BASE = 5.5, INTERLEAVE = 0.004;
-  const maxH = parseFloat(maxStackH) > 0 ? parseFloat(maxStackH) : 40;    // product stack cap, in
-  const maxW = parseFloat(maxSkidWt) > 0 ? parseFloat(maxSkidWt) : 4000;  // weight cap per skid, lb
-  const perPc     = t + INTERLEAVE;
-  const byHeight  = Math.max(1, Math.floor((maxH + INTERLEAVE) / perPc)); // pcs that fit under height cap
-  const byWeight  = Math.max(1, Math.floor(maxW / wtPerPc));              // pcs that fit under weight cap
-  const perSkid   = Math.max(1, Math.min(byHeight, byWeight, q));
+  const maxH  = parseFloat(maxStackH) > 0 ? parseFloat(maxStackH) : 40;    // product stack cap, in
+  const maxW  = parseFloat(maxSkidWt) > 0 ? parseFloat(maxSkidWt) : 4000;  // weight cap per skid, lb
+  const dL    = parseFloat(deckL) > 0 ? parseFloat(deckL) : 96;            // skid deck length, in
+  const dW    = parseFloat(deckW) > 0 ? parseFloat(deckW) : 48;            // skid deck width, in
+
+  // 2D nest per layer, trying both orientations of the piece on the deck
+  const fit = (pL, pW) => Math.floor(dL / pL) * Math.floor(dW / pW);
+  let perLayer = Math.max(fit(l, w), fit(w, l));
+  let footL, footW;
+  if (perLayer < 1) {                    // piece bigger than deck -> rides one per layer on its own footprint
+    perLayer = 1;
+    footL = l + 4; footW = w + 4;
+  } else {
+    footL = dL; footW = dW;
+  }
+
+  const layersByH = Math.max(1, Math.floor((maxH + INTERLEAVE) / (t + INTERLEAVE)));
+  const spaceCap  = perLayer * layersByH;                 // pcs a skid can physically hold
+  const byWeight  = Math.max(1, Math.floor(maxW / wtPerPc));
+  const perSkid   = Math.max(1, Math.min(spaceCap, byWeight, q));
   const skidCount = Math.ceil(q / perSkid);
   const lastPcs   = q - perSkid * (skidCount - 1);
-  const binding   = perSkid >= q ? "single" : (byHeight <= byWeight ? "height" : "weight");
+  const binding   = perSkid >= q ? "single" : (byWeight <= spaceCap ? "weight" : "space");
 
-  // Dimensions reported for a full skid
-  const fullPcs  = Math.min(perSkid, q);
-  const stackThk = fullPcs * t + Math.max(0, fullPcs - 1) * INTERLEAVE;
-  const totalH   = stackThk + DUNNAGE + SKID_BASE;
-  const skidWt   = fullPcs * wtPerPc;
-  const skidLen  = l + 4;
-  const skidWid  = w + 4;
-  const prodType = getProductType(t);
+  // Dimensions reported for the fullest skid
+  const fullPcs    = Math.min(perSkid, q);
+  const layersUsed = Math.ceil(fullPcs / perLayer);
+  const stackThk   = layersUsed * t + Math.max(0, layersUsed - 1) * INTERLEAVE;
+  const totalH     = stackThk + DUNNAGE + SKID_BASE;
+  const skidWt     = fullPcs * wtPerPc;
+  const prodType   = getProductType(t);
+  const longSide   = Math.max(footL, footW);
 
   const flags = [];
   if (skidCount > 1)
-    flags.push({ level: "info", msg: `Order splits across ${skidCount} skids at ${perSkid} pcs each (${binding === "height" ? "stack-height limited" : "weight limited"}); last skid carries ${lastPcs} pc${lastPcs === 1 ? "" : "s"}` });
+    flags.push({ level: "info", msg: `Order splits across ${skidCount} skids at ${perSkid} pcs each (${binding === "weight" ? "weight limited" : "deck space limited"}); last skid carries ${lastPcs} pc${lastPcs === 1 ? "" : "s"}` });
+  flags.push({ level: "info", msg: `Nest: ${perLayer} pc${perLayer === 1 ? "" : "s"} per layer on a ${fmtN(footL, 0)}" x ${fmtN(footW, 0)}" deck, ${layersUsed} layer${layersUsed === 1 ? "" : "s"} high on the full skid` });
   if (prodType === "PLATE") flags.push({ level: "info", msg: `Plate classification (>= .250")  -  edge/corner protection recommended in transit` });
   if (wtPerPc > 500)       flags.push({ level: "warn",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical handling required` });
   else if (wtPerPc > 300)  flags.push({ level: "info",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical assist recommended` });
-  if (skidWt > 6000)       flags.push({ level: "danger", msg: `Skid weight ${fmtN(skidWt, 0)} lbs  -  heavy-lift required; lower the max skid weight to split further` });
+  if (skidWt > 6000)       flags.push({ level: "danger", msg: `Skid weight ${fmtN(skidWt, 0)} lbs  -  heavy-lift required; lower max skid weight to split further` });
   else if (skidWt > 4000)  flags.push({ level: "warn",   msg: `Skid weight ${fmtN(skidWt, 0)} lbs  -  verify forklift capacity` });
-  if (skidLen > 240) flags.push({ level: "danger", msg: `Skid length ${skidLen}"  -  flatbed or specialized freight likely required` });
-  else if (l > 192)  flags.push({ level: "warn",   msg: `Sheet length ${l}"  -  verify dock/trailer clearance for unloading` });
+  if (longSide > 240)      flags.push({ level: "danger", msg: `Skid footprint ${fmtN(longSide, 0)}"  -  flatbed or specialized freight likely required` });
+  else if (longSide > 192) flags.push({ level: "warn",   msg: `Skid footprint ${fmtN(longSide, 0)}"  -  verify dock/trailer clearance for unloading` });
   return {
     density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
-    perSkid, skidCount, lastPcs, binding, fullPcs,
+    perSkid, skidCount, lastPcs, binding, fullPcs, perLayer, layersUsed,
     stackThk: stackThk.toFixed(3), totalH: totalH.toFixed(1),
     skidWt: skidWt.toFixed(1),
-    skidLen: skidLen.toFixed(0), skidWid: skidWid.toFixed(0),
+    skidLen: fmtN(footL, 0), skidWid: fmtN(footW, 0),
     skidH: SKID_BASE, prodType, flags,
   };
 }
@@ -343,7 +358,7 @@ function SheetDetail({ result, inputs }) {
             <p className="text-xs text-neutral-400 mb-2">height per skid{result.skidCount > 1 ? ` · ${result.skidCount} skids` : ""}</p>
             <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-neutral-500">{result.fullPcs} × {inputs.thickness}" + interleave</span>
+                <span className="text-neutral-500">{result.layersUsed} layers × {inputs.thickness}"</span>
                 <span className="font-bold text-neutral-700">{result.stackThk}"</span>
               </div>
               <div className="flex justify-between">
@@ -363,12 +378,11 @@ function SheetDetail({ result, inputs }) {
 
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
-            <p className="text-sm font-medium text-neutral-600">Skid Length</p>
-            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}"</p>
-            <p className="text-xs text-neutral-400 mb-2">sheet length + 2" each end</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Skid Width:</span> <span className="font-bold">{result.skidWid}"</span></p>
-            <p className="text-xs text-neutral-400">sheet width + 2" each side</p>
-            <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Skid Height:</span> <span className="font-bold">{result.skidH}"</span></p>
+            <p className="text-sm font-medium text-neutral-600">Deck (L × W)</p>
+            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}" × {result.skidWid}"</p>
+            <p className="text-xs text-neutral-400 mb-2">{result.perLayer} pc{result.perLayer === 1 ? "" : "s"} per layer</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Layers:</span> <span className="font-bold">{result.layersUsed}</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Skid Base:</span> <span className="font-bold">{result.skidH}"</span></p>
             <p className="text-xs text-neutral-400 mt-1">per skid ({result.skidCount} total)</p>
           </div>
 
@@ -547,10 +561,10 @@ function TechRef() {
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Sheet / Plate Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
                 <p><span className="font-bold text-neutral-800">Wt/Pc:</span> L x W x t x Density</p>
-                <p><span className="font-bold text-neutral-800">Pcs/Skid:</span> capped by Max Stack Ht and Max Skid Wt, whichever binds first</p>
+                <p><span className="font-bold text-neutral-800">Per Layer:</span> best 2D nest of the piece on the skid deck (both orientations)</p>
+                <p><span className="font-bold text-neutral-800">Pcs/Skid:</span> min(nest x layers-under-height-cap, weight cap)</p>
                 <p><span className="font-bold text-neutral-800">Skids:</span> ceil(Qty / Pcs-per-Skid)</p>
-                <p><span className="font-bold text-neutral-800">Stack:</span> Pcs-per-Skid x Gauge + interleave (0.004" kraft)</p>
-                <p><span className="font-bold text-neutral-800">Total H:</span> Stack + 1.0" dunnage + 5.5" skid</p>
+                <p><span className="font-bold text-neutral-800">Total H:</span> Layers x Gauge + 1.0" dunnage + 5.5" skid</p>
                 <p><span className="font-bold text-neutral-800">Skid L:</span> Sheet Length + 4"</p>
                 <p><span className="font-bold text-neutral-800">Skid W:</span> Sheet Width + 4"</p>
                 <p className="mt-2 pt-2 border-t border-neutral-100">Plate &gt;= .250" per ASTM B209. Sheet &lt;= .249".</p>
@@ -584,7 +598,7 @@ export default function ShippingCalc() {
   const [coilResult, setCoilResult] = useState(null);
 
   const [sheetIn, setSheetIn] = useState({
-    alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "",
+    alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "", deckL: "", deckW: "",
   });
   const [sheetResult, setSheetResult] = useState(null);
 
@@ -658,7 +672,7 @@ export default function ShippingCalc() {
 
   const handleClear = () => {
     setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20" });
-    setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "" });
+    setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "", deckL: "", deckW: "" });
     setExtIn({ alloy: "6063", lbPerFt: "", length: "", qty: "", totalWt: "", bundleW: "", bundleH: "" });
     setCoilResult(null);
     setSheetResult(null);
@@ -877,8 +891,20 @@ export default function ShippingCalc() {
                   <div className="hidden sm:block flex-1" />
                 </div>
 
-                {/* Row 3: per-skid caps */}
+                {/* Row 3: skid deck + per-skid caps */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Skid Deck L (in)</label>
+                    <input type="number" step="1" value={sheetIn.deckL}
+                      onChange={e => updateSheet("deckL", e.target.value)} onKeyDown={sheetKey} placeholder="96"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Skid Deck W (in)</label>
+                    <input type="number" step="1" value={sheetIn.deckW}
+                      onChange={e => updateSheet("deckW", e.target.value)} onKeyDown={sheetKey} placeholder="48"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Stack Ht (in)</label>
                     <input type="number" step="1" value={sheetIn.maxStackH}
@@ -891,10 +917,8 @@ export default function ShippingCalc() {
                       onChange={e => updateSheet("maxSkidWt", e.target.value)} onKeyDown={sheetKey} placeholder="4000"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
-                  <div className="col-span-2 flex items-end">
-                    <p className="text-xs text-neutral-400 pb-2">Caps split the order across skids. Defaults: 40" stack, 4,000 lb/skid.</p>
-                  </div>
                 </div>
+                <p className="text-xs text-neutral-400 mt-2">Pieces nest per layer on the deck, stack to the height cap, then split by weight. Defaults: 96" x 48" deck, 40" stack, 4,000 lb/skid.</p>
 
                 <div className="mt-4 flex items-center gap-3">
                   <button onClick={doSheetCalc}
