@@ -50,133 +50,15 @@ const computeWtPerPc = s => {
   return l * w * t * density;
 };
 
-// ── EXTRUSION PROFILE GEOMETRY ────────────────────────────────────────────────
-// Each shape derives a metal cross-section area (in²) and a per-piece outer
-// bounding box (pieceW x pieceH). Weight per ft is then area x density x 12.
-// Tubes/channel/angle use a uniform-wall model, which is the standard way a
-// distributor eyeballs a banded bundle. "custom" lets the user enter wt/ft and
-// the piece envelope directly for any profile not listed.
-const EXT_SHAPES = [
-  { key: "round_bar",   label: "Round Bar",        fields: [["d", "Dia\""]] },
-  { key: "square_bar",  label: "Square Bar",       fields: [["s", "Side\""]] },
-  { key: "rect_bar",    label: "Rectangle / Flat", fields: [["w", "Width\""], ["h", "Height\""]] },
-  { key: "round_tube",  label: "Round Tube / Pipe",fields: [["od", "OD\""], ["wall", "Wall\""]] },
-  { key: "square_tube", label: "Square Tube",      fields: [["s", "Side\""], ["wall", "Wall\""]] },
-  { key: "rect_tube",   label: "Rectangle Tube",   fields: [["w", "Width\""], ["h", "Height\""], ["wall", "Wall\""]] },
-  { key: "angle",       label: "Angle (L)",        fields: [["a", "Leg A\""], ["b", "Leg B\""], ["t", "Thick\""]] },
-  { key: "channel",     label: "Channel (C)",      fields: [["cd", "Depth\""], ["cf", "Flange\""], ["ct", "Thick\""]] },
-  { key: "custom",      label: "Custom / Other",   fields: [["lbPerFt", "Wt/ft"], ["pieceW", "Piece W\""], ["pieceH", "Piece H\""]] },
-];
-
-const getShapeCfg = key => EXT_SHAPES.find(s => s.key === key) || EXT_SHAPES[0];
-
-// Returns { area, lbPerFt, pieceW, pieceH, dimsLabel } or null if incomplete
-const extProfile = (s, density) => {
-  const num = k => parseFloat(s[k]);
-  let area = 0, pieceW = 0, pieceH = 0, lbPerFt = 0, dimsLabel = "";
-  switch (s.shape) {
-    case "round_bar": {
-      const d = num("d");
-      if (!d || d <= 0) return null;
-      area = Math.PI / 4 * d * d; pieceW = d; pieceH = d;
-      dimsLabel = `${d}" dia`;
-      break;
-    }
-    case "square_bar": {
-      const sd = num("s");
-      if (!sd || sd <= 0) return null;
-      area = sd * sd; pieceW = sd; pieceH = sd;
-      dimsLabel = `${sd}" sq`;
-      break;
-    }
-    case "rect_bar": {
-      const w = num("w"), h = num("h");
-      if (!w || !h || w <= 0 || h <= 0) return null;
-      area = w * h; pieceW = w; pieceH = h;
-      dimsLabel = `${w}" x ${h}"`;
-      break;
-    }
-    case "round_tube": {
-      const od = num("od"), wall = num("wall");
-      if (!od || !wall || od <= 0 || wall <= 0 || od <= 2 * wall) return null;
-      const id = od - 2 * wall;
-      area = Math.PI / 4 * (od * od - id * id); pieceW = od; pieceH = od;
-      dimsLabel = `${od}" OD x ${wall}" wall`;
-      break;
-    }
-    case "square_tube": {
-      const sd = num("s"), wall = num("wall");
-      if (!sd || !wall || sd <= 0 || wall <= 0 || sd <= 2 * wall) return null;
-      const inner = sd - 2 * wall;
-      area = sd * sd - inner * inner; pieceW = sd; pieceH = sd;
-      dimsLabel = `${sd}" sq x ${wall}" wall`;
-      break;
-    }
-    case "rect_tube": {
-      const w = num("w"), h = num("h"), wall = num("wall");
-      if (!w || !h || !wall || w <= 0 || h <= 0 || wall <= 0 || w <= 2 * wall || h <= 2 * wall) return null;
-      area = w * h - (w - 2 * wall) * (h - 2 * wall); pieceW = w; pieceH = h;
-      dimsLabel = `${w}" x ${h}" x ${wall}" wall`;
-      break;
-    }
-    case "angle": {
-      const a = num("a"), b = num("b"), t = num("t");
-      if (!a || !b || !t || a <= 0 || b <= 0 || t <= 0 || t >= a || t >= b) return null;
-      area = t * (a + b - t); pieceW = b; pieceH = a;
-      dimsLabel = `${a}" x ${b}" x ${t}"`;
-      break;
-    }
-    case "channel": {
-      const cd = num("cd"), cf = num("cf"), ct = num("ct");
-      if (!cd || !cf || !ct || cd <= 0 || cf <= 0 || ct <= 0 || ct >= cf || 2 * ct >= cd) return null;
-      // Uniform-wall C: web (depth) + two flanges, minus corner overlap.
-      area = ct * (cd + 2 * (cf - ct)); pieceW = cf; pieceH = cd;
-      dimsLabel = `${cd}" deep x ${cf}" flange x ${ct}"`;
-      break;
-    }
-    case "custom": {
-      const lpf = num("lbPerFt"), pw = num("pieceW"), ph = num("pieceH");
-      if (!lpf || !pw || !ph || lpf <= 0 || pw <= 0 || ph <= 0) return null;
-      lbPerFt = lpf; pieceW = pw; pieceH = ph;
-      area = lpf / (density * 12);
-      dimsLabel = `${lpf} lb/ft, ${pw}" x ${ph}"`;
-      return { area, lbPerFt, pieceW, pieceH, dimsLabel };
-    }
-    default:
-      return null;
-  }
-  lbPerFt = area * density * 12;
-  return { area, lbPerFt, pieceW, pieceH, dimsLabel };
-};
-
-// Tight-pack a bundle of N identical pieces into a near-square cross-section.
-const packBundle = (pieceW, pieceH, N) => {
-  if (N <= 1) return { perRow: 1, rows: 1, bundleW: pieceW, bundleH: pieceH };
-  const targetSide = Math.sqrt(N * pieceW * pieceH);
-  let perRow = Math.max(1, Math.round(targetSide / pieceW));
-  perRow = Math.min(perRow, N);
-  const rows = Math.ceil(N / perRow);
-  return { perRow, rows, bundleW: perRow * pieceW, bundleH: rows * pieceH };
-};
-
-// Length helper — returns length in FEET, or null. unit is "in" or "ft".
-const getLenFt = s => {
-  const v = parseFloat(s.length);
-  if (!v || v <= 0) return null;
-  return s.lengthUnit === "ft" ? v : v / 12;
-};
-
-// Returns lbs/piece for an extrusion state — null if inputs incomplete
+// Returns lbs/piece given an extrusion state object — null if inputs incomplete
 const computeExtWtPerPc = s => {
-  const prof = extProfile(s, getDensity(s.alloy));
-  const Lft = getLenFt(s);
-  if (!prof || !Lft) return null;
-  return prof.lbPerFt * Lft;
+  const lpf = parseFloat(s.lbPerFt), Lft = parseFloat(s.length);
+  if (!lpf || !Lft || lpf <= 0 || Lft <= 0) return null;
+  return lpf * Lft;
 };
 
-// ── COIL GEOMETRY ─────────────────────────────────────────────────────────────
-// Single-coil geometry, shared by the live preview and the full calc.
-function coilGeom({ alloy, thickness, width, weight, coreId }) {
+// ── CALC: COIL ────────────────────────────────────────────────────────────────
+function calcCoil({ alloy, thickness, width, weight, coreId }) {
   const density = getDensity(alloy);
   const t = parseFloat(thickness), w = parseFloat(width);
   const lbs = parseFloat(weight), id = parseFloat(coreId);
@@ -186,160 +68,125 @@ function coilGeom({ alloy, thickness, width, weight, coreId }) {
   const lengthFt = lengthIn / 12;
   const od       = Math.sqrt((4 * lengthIn * t) / Math.PI + id * id);
   if (od <= id) return { error: "Calculated OD <= Core ID - check gauge, width, or weight." };
-  return { density, volIn3, lengthIn, lengthFt, od, w, lbs, id };
-}
-
-// ── COIL COUNT PER SKID ───────────────────────────────────────────────────────
-// Manual mode: use the entered count. Auto mode: fit as many coils as the skid
-// weight cap allows AND the space dimension that grows with each coil — row
-// length when eye-to-side (coils lined up side by side), stack height when
-// eye-to-sky (coils laid flat on top of each other). The smaller wins.
-function coilCount(coilIn, geom) {
-  const orient = coilIn.stackOrient === "sky" ? "sky" : "side";
-  if (!coilIn.autoCoils) {
-    let n = parseInt(coilIn.coilsPerSkid);
-    if (!n || n < 1) n = 1;
-    return { n, orient, limit: null };
-  }
-  const w = geom.w, lbs = geom.lbs;
-  const maxWt = parseFloat(coilIn.maxSkidWt) || 0;
-  const byWt  = (maxWt > 0 && lbs > 0) ? Math.floor(maxWt / lbs) : 9999;
-  let byDim = 9999;
-  const dimName = orient === "sky" ? "height" : "row length";
-  if (orient === "sky") {
-    const maxH = parseFloat(coilIn.maxStackH) || 0;
-    if (maxH > 0 && w > 0) byDim = Math.floor((maxH - 6) / w);
-  } else {
-    const maxLen = parseFloat(coilIn.maxRowLen) || 0;
-    if (maxLen > 0 && w > 0) byDim = Math.floor((maxLen - 4) / w);
-  }
-  const n = Math.max(1, Math.min(byWt, byDim));
-  const limit = byWt <= byDim ? "weight" : dimName;
-  return { n, orient, limit, byWt, byDim };
-}
-
-// ── CALC: COIL ────────────────────────────────────────────────────────────────
-function calcCoil(coilIn) {
-  const geom = coilGeom(coilIn);
-  if (!geom) return null;
-  if (geom.error) return { error: geom.error };
-  const { density, volIn3, lengthIn, lengthFt, od, w } = geom;
-  const lbs = geom.lbs;
-  const t = parseFloat(coilIn.thickness);
-  const { n: N, orient, limit } = coilCount(coilIn, geom);
-
-  const skidH = 6;
-  let footLen, footWid, totalH;
-  if (orient === "side") {
-    // axis horizontal, coils nested side by side in a saddle
-    footLen = N * w + 4;             // 2" clearance each end
-    footWid = getSaddleWidth(od);
-    totalH  = od + skidH;
-  } else {
-    // eye to sky, coils laid flat and stacked on top of each other
-    footLen = od;
-    footWid = od;
-    totalH  = N * w + skidH;
-  }
-
-  const perCoilWt = lbs;
-  const bundleWt  = lbs * N;
-  const prodType  = getProductType(t);
-
+  const skidLen  = Math.ceil((w + 4) / 2) * 2;
+  const skidWid  = getSaddleWidth(od);
+  const skidH    = 6;
+  const totalH   = od + skidH;
+  const prodType = getProductType(t);
   const flags = [];
-  if (coilIn.autoCoils) {
-    const cap = (parseFloat(coilIn.maxSkidWt) || 0).toLocaleString();
-    const limLbl = limit === "weight" ? `weight-limited at ${cap} lbs/skid` : `${limit}-limited`;
-    flags.push({ level: "info", msg: `Auto-fit ${N} coil${N === 1 ? "" : "s"} per skid (${limLbl})  -  change the skid weight cap or switch to manual to override` });
-  }
-  if (od > 72)      flags.push({ level: "warn", msg: `OD ${fmtN(od)}" exceeds 72"  -  verify skid/saddle load rating and coil handling equipment` });
-  else if (od > 60) flags.push({ level: "info", msg: `Large OD (${fmtN(od)}")  -  confirm saddle and handling equipment are rated for this diameter` });
-  if (totalH > 96)      flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  -  specialized freight or open-top trailer may be required` });
-  else if (totalH > 72) flags.push({ level: "warn",   msg: `Stack height ${fmtN(totalH)}"  -  verify dock door height and warehouse rack clearance` });
-  if (bundleWt > 20000)      flags.push({ level: "danger", msg: `Skid total ${bundleWt.toLocaleString()} lbs >20,000  -  heavy-lift equipment required` });
-  else if (bundleWt > 15000) flags.push({ level: "warn",   msg: `Skid total ${bundleWt.toLocaleString()} lbs  -  verify forklift rated capacity` });
+  if (od > 72)      flags.push({ level: "warn",   msg: `OD ${fmtN(od)}" exceeds 72"  -  verify skid/saddle load rating and coil handling equipment` });
+  else if (od > 60) flags.push({ level: "info",   msg: `Large OD (${fmtN(od)}")  -  confirm saddle and handling equipment are rated for this diameter` });
+  if (totalH > 96)       flags.push({ level: "danger", msg: `Stack height ${fmtN(totalH)}" >96"  -  specialized freight or open-top trailer may be required` });
+  else if (totalH > 72)  flags.push({ level: "warn",   msg: `Stack height ${fmtN(totalH)}"  -  verify dock door height and warehouse rack clearance` });
+  if (lbs > 20000)      flags.push({ level: "danger", msg: `Coil weight ${lbs.toLocaleString()} lbs >20,000  -  heavy-lift equipment required` });
+  else if (lbs > 15000) flags.push({ level: "warn",   msg: `Coil weight ${lbs.toLocaleString()} lbs  -  verify forklift rated capacity` });
   if (lengthFt > 8000) flags.push({ level: "info", msg: `Very long coil (${Math.round(lengthFt).toLocaleString()} ft)  -  confirm weld count with supplier` });
-  if (orient === "side" && N > 1 && od > 1.5 * footLen) {
-    flags.push({ level: "info", msg: `Tall narrow stack (OD ${fmtN(od)}" over a ${fmtN(footLen)}" base)  -  eye-to-sky stacking may ship more stably for ${N} narrow coils` });
-  }
-
   return {
     density, volIn3: Math.round(volIn3),
     lengthIn: Math.round(lengthIn), lengthFt: Math.round(lengthFt),
-    od: fmtN(od), odNum: od, orient, N, width: w, autoCoils: !!coilIn.autoCoils, limit,
-    footLen: fmtN(footLen), footWid: fmtN(footWid, 0), skidH,
-    totalH: fmtN(totalH), totalHNum: totalH,
-    perCoilWt, bundleWt, prodType, flags,
+    od: fmtN(od), skidLen, skidWid, skidH,
+    totalH: fmtN(totalH), prodType, flags,
   };
 }
 
 // ── CALC: SHEET / PLATE ───────────────────────────────────────────────────────
-function calcSheet({ alloy, thickness, width, length, qty }) {
+function calcSheet({ alloy, thickness, width, length, qty, maxStackH, maxSkidWt }) {
   const density = getDensity(alloy);
   const t = parseFloat(thickness), w = parseFloat(width);
   const l = parseFloat(length),    q = parseInt(qty);
   if (!t || !w || !l || !q || t <= 0 || w <= 0 || l <= 0 || q <= 0) return null;
   const wtPerPc  = l * w * t * density;
   const totalWt  = wtPerPc * q;
-  const stackThk = q * t + Math.max(0, q - 1) * 0.004;
-  const dunnage  = 1.0;
-  const skidH    = 5.5;
-  const totalH   = stackThk + dunnage + skidH;
+
+  // Realistic packing: a single skid is capped by product stack height and by
+  // weight. Split the order across as many skids as needed rather than piling the
+  // whole quantity into one impossible column.
+  const DUNNAGE = 1.0, SKID_BASE = 5.5, INTERLEAVE = 0.004;
+  const maxH = parseFloat(maxStackH) > 0 ? parseFloat(maxStackH) : 40;    // product stack cap, in
+  const maxW = parseFloat(maxSkidWt) > 0 ? parseFloat(maxSkidWt) : 4000;  // weight cap per skid, lb
+  const perPc     = t + INTERLEAVE;
+  const byHeight  = Math.max(1, Math.floor((maxH + INTERLEAVE) / perPc)); // pcs that fit under height cap
+  const byWeight  = Math.max(1, Math.floor(maxW / wtPerPc));              // pcs that fit under weight cap
+  const perSkid   = Math.max(1, Math.min(byHeight, byWeight, q));
+  const skidCount = Math.ceil(q / perSkid);
+  const lastPcs   = q - perSkid * (skidCount - 1);
+  const binding   = perSkid >= q ? "single" : (byHeight <= byWeight ? "height" : "weight");
+
+  // Dimensions reported for a full skid
+  const fullPcs  = Math.min(perSkid, q);
+  const stackThk = fullPcs * t + Math.max(0, fullPcs - 1) * INTERLEAVE;
+  const totalH   = stackThk + DUNNAGE + SKID_BASE;
+  const skidWt   = fullPcs * wtPerPc;
   const skidLen  = l + 4;
   const skidWid  = w + 4;
   const prodType = getProductType(t);
+
   const flags = [];
+  if (skidCount > 1)
+    flags.push({ level: "info", msg: `Order splits across ${skidCount} skids at ${perSkid} pcs each (${binding === "height" ? "stack-height limited" : "weight limited"}); last skid carries ${lastPcs} pc${lastPcs === 1 ? "" : "s"}` });
   if (prodType === "PLATE") flags.push({ level: "info", msg: `Plate classification (>= .250")  -  edge/corner protection recommended in transit` });
   if (wtPerPc > 500)       flags.push({ level: "warn",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical handling required` });
   else if (wtPerPc > 300)  flags.push({ level: "info",   msg: `Individual piece ${fmtN(wtPerPc, 0)} lbs  -  mechanical assist recommended` });
-  if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  -  heavy-lift equipment required` });
-  else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  -  verify forklift capacity` });
+  if (skidWt > 6000)       flags.push({ level: "danger", msg: `Skid weight ${fmtN(skidWt, 0)} lbs  -  heavy-lift required; lower the max skid weight to split further` });
+  else if (skidWt > 4000)  flags.push({ level: "warn",   msg: `Skid weight ${fmtN(skidWt, 0)} lbs  -  verify forklift capacity` });
   if (skidLen > 240) flags.push({ level: "danger", msg: `Skid length ${skidLen}"  -  flatbed or specialized freight likely required` });
   else if (l > 192)  flags.push({ level: "warn",   msg: `Sheet length ${l}"  -  verify dock/trailer clearance for unloading` });
   return {
     density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
+    perSkid, skidCount, lastPcs, binding, fullPcs,
     stackThk: stackThk.toFixed(3), totalH: totalH.toFixed(1),
+    skidWt: skidWt.toFixed(1),
     skidLen: skidLen.toFixed(0), skidWid: skidWid.toFixed(0),
-    skidH, prodType, flags,
+    skidH: SKID_BASE, prodType, flags,
   };
 }
 
 // ── CALC: EXTRUSION ───────────────────────────────────────────────────────────
-function calcExtrusion(s) {
-  const density = getDensity(s.alloy);
-  const prof = extProfile(s, density);
-  const Lft  = getLenFt(s);
-  const q    = parseInt(s.qty);
-  if (!prof || !Lft || !q || q <= 0) return null;
-
-  const lengthIn = Lft * 12;
-  const wtPerPc  = prof.lbPerFt * Lft;
+function calcExtrusion({ alloy, lbPerFt, length, qty, bundleW, bundleH }) {
+  const density = getDensity(alloy);
+  const lpf = parseFloat(lbPerFt), Lft = parseFloat(length), q = parseInt(qty);
+  const bw  = parseFloat(bundleW), bh = parseFloat(bundleH);
+  if (!lpf || !Lft || !q || lpf <= 0 || Lft <= 0 || q <= 0) return null;
+  const wtPerPc  = lpf * Lft;
   const totalWt  = wtPerPc * q;
-  const pack     = packBundle(prof.pieceW, prof.pieceH, q);
-  const bunkH    = 4;
-  const totalH   = pack.bundleH + bunkH;
-  const footLen  = lengthIn;
-  const footWid  = pack.bundleW;
+  const lengthIn = Lft * 12;
+  const xArea    = lpf / (density * 12);       // cross-sectional metal area, in² per pc
+
+  // Bundle cross-section. Weight per ft only gives the metal area of one piece, not
+  // the profile's outer W x H, so a true footprint needs the banded bundle size.
+  // If either dimension is left blank, estimate it from the bundle's total metal
+  // area and a typical banded packing efficiency (extrusions bundle loose, with
+  // voids). The estimate scales with qty and profile size, then the user can refine.
+  const PACK_EFF    = 0.35;                     // ~35% of the bundle envelope is metal
+  const envelopeIn2 = (q * xArea) / PACK_EFF;   // estimated bundle bounding-box area
+  const haveW = bw && bw > 0;
+  const haveH = bh && bh > 0;
+  let bundW, bundH, estW = false, estH = false;
+  if (haveW && haveH)      { bundW = bw; bundH = bh; }
+  else if (haveW)          { bundW = bw; bundH = envelopeIn2 / bw; estH = true; }
+  else if (haveH)          { bundH = bh; bundW = envelopeIn2 / bh; estW = true; }
+  else                     { bundW = bundH = Math.sqrt(envelopeIn2); estW = estH = true; } // square bundle
+  const estimated = estW || estH;
+
+  const bunkH    = 4;                           // dunnage / bunks under the bundle
+  const totalH   = bundH + bunkH;
+  const skidLen  = lengthIn;                    // bunks span the load length
+  const footW    = bundW;
 
   const flags = [];
-  if (lengthIn > 288)      flags.push({ level: "warn", msg: `Stock length ${fmtN(Lft, 0)} ft (${Math.round(lengthIn)}")  -  flatbed or 53' trailer required; verify overhang and side-load access` });
+  if (lengthIn > 288)      flags.push({ level: "warn", msg: `Stock length ${fmtN(Lft, 0)} ft (${lengthIn}")  -  flatbed or 53' trailer required; verify overhang and side-load access` });
   else if (lengthIn > 240) flags.push({ level: "info", msg: `Long stock ${fmtN(Lft, 0)} ft  -  confirm trailer length and dock clearance for unloading` });
   if (totalWt > 20000)     flags.push({ level: "danger", msg: `Bundle total >20,000 lbs  -  heavy-lift equipment required` });
   else if (totalWt > 4000) flags.push({ level: "warn",   msg: `Bundle total ${fmtN(totalWt, 0)} lbs  -  verify forklift capacity` });
   if (wtPerPc > 300)       flags.push({ level: "info", msg: `Heavy single length ${fmtN(wtPerPc, 0)} lbs/pc  -  mechanical handling recommended` });
-  flags.push({ level: "info", msg: `Bundle cross-section estimated at ${fmtN(pack.bundleW, 1)}" x ${fmtN(pack.bundleH, 1)}" from ${q} pcs (${pack.perRow} across x ${pack.rows} high, tight pack)  -  band orientation may differ; treat footprint as a planning estimate` });
+  if (estimated)           flags.push({ level: "info", msg: `Bundle cross-section ESTIMATED at ${fmtN(bundW, 0)}" x ${fmtN(bundH, 0)}" from ${q} pcs of ${xArea.toFixed(3)} in metal at ${Math.round(PACK_EFF * 100)}% packing  -  weight per ft does not carry the profile shape, so enter the actual banded W x H for an exact footprint` });
 
   return {
-    density, shapeLabel: getShapeCfg(s.shape).label, dimsLabel: prof.dimsLabel,
-    lbPerFt: prof.lbPerFt.toFixed(3), area: prof.area.toFixed(3),
-    wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
-    lengthIn: Math.round(lengthIn), lengthFt: Lft,
-    N: q, pieceW: fmtN(prof.pieceW, 2), pieceH: fmtN(prof.pieceH, 2),
-    perRow: pack.perRow, rows: pack.rows,
-    bundleW: fmtN(pack.bundleW, 1), bundleH: fmtN(pack.bundleH, 1),
-    bunkH, totalH: totalH.toFixed(1),
-    footLen: Math.round(footLen), footWid: fmtN(pack.bundleW, 1),
-    prodType: "EXTRUSION", flags,
+    density, wtPerPc: wtPerPc.toFixed(1), totalWt: totalWt.toFixed(1),
+    lengthIn, lengthFt: Lft,
+    bundW: fmtN(bundW, 1), bundH: fmtN(bundH, 1), bunkH, totalH: totalH.toFixed(1),
+    skidLen: skidLen.toFixed(0), footW: fmtN(footW, 1), xArea: xArea.toFixed(3),
+    estimated, estW, estH, prodType: "EXTRUSION", flags,
   };
 }
 
@@ -361,11 +208,10 @@ function FlagBanner({ flag }) {
 
 // ── COIL DETAIL CARD ──────────────────────────────────────────────────────────
 function CoilDetail({ result, inputs }) {
-  const totalHNum  = result.totalHNum;
+  const lbs        = parseFloat(inputs.weight);
+  const totalHNum  = parseFloat(result.totalH);
   const heightOk   = totalHNum <= 72;
   const heightWarn = totalHNum > 72 && totalHNum <= 96;
-  const N          = result.N;
-  const orientLbl  = result.orient === "sky" ? "eye to sky, stacked flat" : "eye to side, in saddle";
 
   return (
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
@@ -375,14 +221,9 @@ function CoilDetail({ result, inputs }) {
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-neutral-600 text-white border border-neutral-500">
             {result.prodType}
           </span>
-          {N > 1 && (
-            <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-red-700 text-white">
-              {N} / SKID
-            </span>
-          )}
         </h2>
         <p className="text-xs text-neutral-400 mt-0.5">
-          {inputs.alloy} @ {inputs.thickness}" | {inputs.width}" wide | {result.perCoilWt.toLocaleString()} lbs/coil | {inputs.coreId}" core | {N} coil{N === 1 ? "" : "s"}/skid ({orientLbl})
+          {inputs.alloy} @ {inputs.thickness}" | {inputs.width}" wide | {lbs.toLocaleString()} lbs | {inputs.coreId}" core | Density: {result.density} lb/in³
         </p>
       </div>
 
@@ -403,30 +244,23 @@ function CoilDetail({ result, inputs }) {
 
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
-            <p className="text-sm font-medium text-neutral-600">{result.orient === "sky" ? "Pad Diameter" : "Skid Length (axis)"}</p>
-            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.footLen}"</p>
-            <p className="text-xs text-neutral-400 mb-2">{result.orient === "sky" ? "coil OD footprint" : `${N} x width + 2" each end`}</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">{result.orient === "sky" ? "Pad Width:" : "Saddle Width:"}</span> <span className="font-bold">{result.footWid}"</span></p>
-            <p className="text-xs text-neutral-400">{result.orient === "sky" ? "coil OD footprint" : "scales to OD"}</p>
+            <p className="text-sm font-medium text-neutral-600">Skid Length (axis)</p>
+            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}"</p>
+            <p className="text-xs text-neutral-400 mb-2">coil width + 2" each end</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Saddle Width:</span> <span className="font-bold">{result.skidWid}"</span></p>
+            <p className="text-xs text-neutral-400">scales to OD</p>
             <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Skid Height:</span> <span className="font-bold">{result.skidH}"</span></p>
           </div>
 
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Total Stack Height</p>
             <p className="text-3xl font-extrabold text-neutral-900">{result.totalH}"</p>
-            <p className="text-xs text-neutral-400 mb-2">floor to top</p>
+            <p className="text-xs text-neutral-400 mb-2">eye to sky</p>
             <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
-              {result.orient === "sky" ? (
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">{N} x {inputs.width}" width</span>
-                  <span className="font-bold text-neutral-700">{fmtN(N * result.width)}"</span>
-                </div>
-              ) : (
-                <div className="flex justify-between">
-                  <span className="text-neutral-500">OD</span>
-                  <span className="font-bold text-neutral-700">{result.od}"</span>
-                </div>
-              )}
+              <div className="flex justify-between">
+                <span className="text-neutral-500">OD</span>
+                <span className="font-bold text-neutral-700">{result.od}"</span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">+ Skid</span>
                 <span className="font-bold text-neutral-700">{result.skidH}"</span>
@@ -440,10 +274,9 @@ function CoilDetail({ result, inputs }) {
 
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.footLen}" × {result.footWid}"</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.skidWid}"</span></p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Height:</span> <span className="font-bold">{result.totalH}"</span></p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Per Coil:</span> <span className="font-bold">{result.perCoilWt.toLocaleString()} lbs</span></p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Skid Total:</span> <span className="font-bold text-red-700">{result.bundleWt.toLocaleString()} lbs</span> <span className="text-xs text-neutral-400">({N} x)</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Coil Weight:</span> <span className="font-bold">{lbs.toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
               <p className={`text-xs font-semibold ${heightOk ? "text-green-700" : heightWarn ? "text-amber-700" : "text-red-700"}`}>
                 {heightOk ? "✓ Standard dock clearance" : heightWarn ? "⚠ Verify dock/rack clearance" : "⛔ Oversized — special freight"}
@@ -460,8 +293,8 @@ function CoilDetail({ result, inputs }) {
           <p className="flex items-center gap-2 flex-wrap">
             <span className="text-neutral-400">⬡</span>
             {inputs.alloy} @ {inputs.thickness}" | {inputs.width}" wide | OD: <span className="text-red-400">{result.od}"</span> |
-            {N} / skid | Skid: {result.footLen}" × {result.footWid}" |
-            <span className="text-amber-400">Total Height: {result.totalH}"</span> | {result.bundleWt.toLocaleString()} lbs
+            Skid: {result.skidLen}" L × {result.skidWid}" W × {result.skidH}" H |
+            <span className="text-amber-400">Total Height: {result.totalH}"</span> | {lbs.toLocaleString()} lbs
           </p>
         </div>
       </div>
@@ -500,17 +333,17 @@ function SheetDetail({ result, inputs }) {
             <div className="mt-2 pt-2 border-t border-neutral-200 space-y-0.5">
               <p className="text-sm"><span className="font-medium text-neutral-600">Qty:</span> <span className="font-bold">{q.toLocaleString()} pcs</span></p>
               <p className="text-sm"><span className="font-medium text-neutral-600">Total Weight:</span> <span className="font-bold text-red-700">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
-              <p className="text-sm"><span className="font-medium text-neutral-600">Product:</span> <span className="font-bold">{result.prodType}</span></p>
+              <p className="text-sm"><span className="font-medium text-neutral-600">Skids:</span> <span className="font-bold">{result.skidCount} @ {result.perSkid} pcs{result.skidCount > 1 ? ` (last: ${result.lastPcs})` : ""}</span></p>
             </div>
           </div>
 
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
             <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Stack Profile</p>
             <p className="text-3xl font-extrabold text-neutral-900">{result.totalH}"</p>
-            <p className="text-xs text-neutral-400 mb-2">total stack height</p>
+            <p className="text-xs text-neutral-400 mb-2">height per skid{result.skidCount > 1 ? ` · ${result.skidCount} skids` : ""}</p>
             <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-neutral-500">{q} × {inputs.thickness}" + interleave</span>
+                <span className="text-neutral-500">{result.fullPcs} × {inputs.thickness}" + interleave</span>
                 <span className="font-bold text-neutral-700">{result.stackThk}"</span>
               </div>
               <div className="flex justify-between">
@@ -522,7 +355,7 @@ function SheetDetail({ result, inputs }) {
                 <span className="font-bold text-neutral-700">{result.skidH}"</span>
               </div>
               <div className="flex justify-between border-t border-neutral-200 pt-1">
-                <span className="font-bold text-neutral-800">= Total</span>
+                <span className="font-bold text-neutral-800">= Per Skid</span>
                 <span className="font-bold text-red-700">{result.totalH}"</span>
               </div>
             </div>
@@ -536,13 +369,14 @@ function SheetDetail({ result, inputs }) {
             <p className="text-sm"><span className="font-medium text-neutral-600">Skid Width:</span> <span className="font-bold">{result.skidWid}"</span></p>
             <p className="text-xs text-neutral-400">sheet width + 2" each side</p>
             <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Skid Height:</span> <span className="font-bold">{result.skidH}"</span></p>
+            <p className="text-xs text-neutral-400 mt-1">per skid ({result.skidCount} total)</p>
           </div>
 
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.skidWid}"</span></p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Height:</span> <span className="font-bold">{result.totalH}"</span></p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Wt:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Skid (each):</span> <span className="font-bold">{result.skidLen}" × {result.skidWid}" × {result.totalH}"</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Skid Count:</span> <span className="font-bold text-red-700">{result.skidCount}</span> <span className="text-neutral-500">@ {parseFloat(result.skidWt).toLocaleString()} lbs</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Order Total:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
               <p className={`text-xs font-semibold ${skidOk ? "text-green-700" : skidWarn ? "text-amber-700" : "text-red-700"}`}>
                 {skidOk ? "✓ Standard trailer length" : skidWarn ? "⚠ Long load — verify trailer" : "⛔ Oversized — special freight"}
@@ -560,8 +394,8 @@ function SheetDetail({ result, inputs }) {
             <span className="text-neutral-400">📋</span>
             {inputs.alloy} @ {inputs.thickness}" | {inputs.width}" × {inputs.length}" × {q} pcs |
             {parseFloat(result.totalWt).toLocaleString()} lbs |
-            Skid: {result.skidLen}" × {result.skidWid}" |
-            <span className="text-amber-400">Total Height: {result.totalH}"</span>
+            <span className="text-red-400">{result.skidCount} skid{result.skidCount === 1 ? "" : "s"}</span> @ {result.skidLen}" × {result.skidWid}" |
+            <span className="text-amber-400">Skid Height: {result.totalH}"</span>
           </p>
         </div>
       </div>
@@ -571,7 +405,7 @@ function SheetDetail({ result, inputs }) {
 
 // ── EXTRUSION DETAIL CARD ─────────────────────────────────────────────────────
 function ExtrusionDetail({ result, inputs }) {
-  const q       = result.N;
+  const q       = parseInt(inputs.qty);
   const lenIn   = result.lengthIn;
   const lenOk   = lenIn <= 240;
   const lenWarn = lenIn > 240 && lenIn <= 288;
@@ -582,11 +416,11 @@ function ExtrusionDetail({ result, inputs }) {
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
           Shipping Dimensions — Extrusion
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-neutral-600 text-white border border-neutral-500">
-            {result.shapeLabel}
+            {result.prodType}
           </span>
         </h2>
         <p className="text-xs text-neutral-400 mt-0.5">
-          {inputs.alloy} {result.dimsLabel} | {result.lbPerFt} lb/ft | {fmtN(result.lengthFt, 1)} ft lengths | {q} {q === 1 ? "pc" : "pcs"} | X-sec: {result.area} in² | Density: {result.density} lb/in³
+          {inputs.alloy} @ {inputs.lbPerFt} lb/ft | {fmtN(result.lengthFt, 0)} ft lengths | {q} {q === 1 ? "pc" : "pcs"} | X-sec: {result.xArea} in² | Density: {result.density} lb/in³
         </p>
       </div>
 
@@ -598,7 +432,7 @@ function ExtrusionDetail({ result, inputs }) {
             <p className="text-sm font-medium text-neutral-600">Weight / Piece</p>
             <p className="text-2xl font-extrabold text-neutral-900">{parseFloat(result.wtPerPc).toLocaleString()} lbs</p>
             <div className="mt-2 pt-2 border-t border-neutral-200 space-y-0.5">
-              <p className="text-sm"><span className="font-medium text-neutral-600">Length:</span> <span className="font-bold">{fmtN(result.lengthFt, 1)} ft ({result.lengthIn.toLocaleString()}")</span></p>
+              <p className="text-sm"><span className="font-medium text-neutral-600">Length:</span> <span className="font-bold">{fmtN(result.lengthFt, 0)} ft ({result.lengthIn.toLocaleString()}")</span></p>
               <p className="text-sm"><span className="font-medium text-neutral-600">Qty:</span> <span className="font-bold">{q.toLocaleString()} pcs</span></p>
               <p className="text-sm"><span className="font-medium text-neutral-600">Total Weight:</span> <span className="font-bold text-red-700">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             </div>
@@ -610,12 +444,12 @@ function ExtrusionDetail({ result, inputs }) {
             <p className="text-xs text-neutral-400 mb-2">total stack height</p>
             <div className="pt-1 border-t border-neutral-200 space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-neutral-500">Bundle Height (est)</span>
-                <span className="font-bold text-amber-700">{result.bundleH}"</span>
+                <span className="text-neutral-500">Bundle Height{result.estH ? " (est)" : ""}</span>
+                <span className={`font-bold ${result.estH ? "text-amber-700" : "text-neutral-700"}`}>{result.bundH}"</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-neutral-500">Bundle Width (est)</span>
-                <span className="font-bold text-amber-700">{result.bundleW}"</span>
+                <span className="text-neutral-500">Bundle Width{result.estW ? " (est)" : ""}</span>
+                <span className={`font-bold ${result.estW ? "text-amber-700" : "text-neutral-700"}`}>{result.bundW}"</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-500">Bunks</span>
@@ -629,18 +463,18 @@ function ExtrusionDetail({ result, inputs }) {
           </div>
 
           <div className="bg-gradient-to-br from-neutral-50 to-neutral-100 p-3 rounded-xl border border-neutral-200">
-            <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Profile / Pack</p>
-            <p className="text-sm font-medium text-neutral-600">Per Piece (W x H)</p>
-            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.pieceW}" × {result.pieceH}"</p>
-            <p className="text-xs text-neutral-400 mb-2">{result.dimsLabel}</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Pack:</span> <span className="font-bold">{result.perRow} across × {result.rows} high</span></p>
-            <p className="text-xs text-neutral-400">tight-pack estimate</p>
-            <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Bunk Length:</span> <span className="font-bold">{result.footLen}"</span></p>
+            <p className="font-bold text-red-700 mb-2 text-sm uppercase tracking-wide">Skid Footprint</p>
+            <p className="text-sm font-medium text-neutral-600">Bunk Length</p>
+            <p className="text-2xl font-extrabold text-neutral-900 mb-0.5">{result.skidLen}"</p>
+            <p className="text-xs text-neutral-400 mb-2">spans full stock length</p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Width:</span> <span className={`font-bold ${result.estW ? "text-amber-700" : ""}`}>{result.footW}"</span></p>
+            <p className="text-xs text-neutral-400">{result.estimated ? "estimated cross-section" : "banded cross-section"}</p>
+            <p className="text-sm mt-1"><span className="font-medium text-neutral-600">Bunk Height:</span> <span className="font-bold">{result.bunkH}"</span></p>
           </div>
 
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-3 rounded-xl border border-amber-200">
             <p className="font-bold text-amber-700 mb-2 text-sm uppercase tracking-wide">📦 Freight Profile</p>
-            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.footLen}" × {result.footWid}" est</span></p>
+            <p className="text-sm"><span className="font-medium text-neutral-600">Footprint:</span> <span className="font-bold">{result.skidLen}" × {result.footW}"{result.estimated ? " est" : ""}</span></p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Height:</span> <span className="font-bold">{result.totalH}"</span></p>
             <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Wt:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
@@ -658,9 +492,9 @@ function ExtrusionDetail({ result, inputs }) {
         <div className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white p-4 rounded-xl font-bold text-sm shadow-lg">
           <p className="flex items-center gap-2 flex-wrap">
             <span className="text-neutral-400">⫼</span>
-            {inputs.alloy} {result.dimsLabel} | {fmtN(result.lengthFt, 1)} ft × {q} pcs |
+            {inputs.alloy} @ {inputs.lbPerFt} lb/ft | {fmtN(result.lengthFt, 0)} ft × {q} pcs |
             {parseFloat(result.totalWt).toLocaleString()} lbs |
-            Bundle: {result.footLen}" L × {result.footWid}" W |
+            Bundle: {result.skidLen}" L × {result.footW}" W |
             <span className="text-amber-400">Total Height: {result.totalH}"</span>
           </p>
         </div>
@@ -703,17 +537,19 @@ function TechRef() {
                 <p><span className="font-bold text-neutral-800">Volume:</span> Weight / Density</p>
                 <p><span className="font-bold text-neutral-800">Length:</span> Volume / (Gauge x Width)</p>
                 <p><span className="font-bold text-neutral-800">OD:</span> sqrt(4 x L x t / pi + ID²)</p>
+                <p><span className="font-bold text-neutral-800">Stack Height:</span> OD + 6" skid</p>
                 <p className="mt-2 pt-2 border-t border-neutral-100">
-                  <span className="font-bold text-neutral-800">Eye to side:</span> coils nested in a saddle, height = OD + 6", footprint = (coils x width + 4") x saddle width.
+                  <span className="font-bold text-neutral-800">Saddle width</span> scales with OD — widens for large coils to maintain stability.
                 </p>
-                <p><span className="font-bold text-neutral-800">Eye to sky:</span> coils laid flat and stacked, height = coils x width + 6", footprint = OD x OD.</p>
               </div>
             </div>
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Sheet / Plate Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
                 <p><span className="font-bold text-neutral-800">Wt/Pc:</span> L x W x t x Density</p>
-                <p><span className="font-bold text-neutral-800">Stack:</span> Qty x Gauge + (Qty-1) x 0.004" interleave (standard kraft paper)</p>
+                <p><span className="font-bold text-neutral-800">Pcs/Skid:</span> capped by Max Stack Ht and Max Skid Wt, whichever binds first</p>
+                <p><span className="font-bold text-neutral-800">Skids:</span> ceil(Qty / Pcs-per-Skid)</p>
+                <p><span className="font-bold text-neutral-800">Stack:</span> Pcs-per-Skid x Gauge + interleave (0.004" kraft)</p>
                 <p><span className="font-bold text-neutral-800">Total H:</span> Stack + 1.0" dunnage + 5.5" skid</p>
                 <p><span className="font-bold text-neutral-800">Skid L:</span> Sheet Length + 4"</p>
                 <p><span className="font-bold text-neutral-800">Skid W:</span> Sheet Width + 4"</p>
@@ -723,12 +559,12 @@ function TechRef() {
             <div>
               <p className="font-bold text-neutral-700 mb-2 uppercase tracking-wide text-xs">Extrusion Geometry</p>
               <div className="space-y-2 text-xs text-neutral-600">
-                <p><span className="font-bold text-neutral-800">Area:</span> from profile shape + size (bar, tube, angle, channel)</p>
-                <p><span className="font-bold text-neutral-800">Wt/ft:</span> Area x Density x 12</p>
                 <p><span className="font-bold text-neutral-800">Wt/Pc:</span> Wt-per-ft x Length(ft)</p>
                 <p><span className="font-bold text-neutral-800">Total Wt:</span> Wt/Pc x Qty</p>
-                <p><span className="font-bold text-neutral-800">Bundle:</span> N pieces tight-packed near-square; height = bundle H + 4" bunks.</p>
-                <p className="mt-2 pt-2 border-t border-neutral-100">Enter the profile shape and size plus pcs (or total weight). Tube/angle/channel use a uniform-wall model. Bundle footprint is a planning estimate; actual band orientation may differ.</p>
+                <p><span className="font-bold text-neutral-800">X-Sec Area:</span> Wt-per-ft / (Density x 12) — derived in²</p>
+                <p><span className="font-bold text-neutral-800">Footprint:</span> Length x Bundle Width</p>
+                <p><span className="font-bold text-neutral-800">Total H:</span> Bundle Height + 4" bunks</p>
+                <p className="mt-2 pt-2 border-t border-neutral-100">Bundle W x H are optional. If blank, the bundle envelope is estimated from Qty x metal area at ~35% packing. Weight per ft does not carry the profile shape, so enter actual banded W x H for an exact footprint.</p>
               </div>
             </div>
           </div>
@@ -744,22 +580,16 @@ export default function ShippingCalc() {
 
   const [coilIn, setCoilIn] = useState({
     alloy: "5052", thickness: "", width: "", weight: "", coreId: "20",
-    coilsPerSkid: "1", stackOrient: "side",
-    autoCoils: true, maxSkidWt: "5000", maxStackH: "72", maxRowLen: "96",
   });
   const [coilResult, setCoilResult] = useState(null);
 
   const [sheetIn, setSheetIn] = useState({
-    alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "",
+    alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "",
   });
   const [sheetResult, setSheetResult] = useState(null);
 
   const [extIn, setExtIn] = useState({
-    alloy: "6063", shape: "round_bar",
-    d: "", s: "", w: "", h: "", od: "", wall: "", a: "", b: "", t: "",
-    cd: "", cf: "", ct: "",
-    lbPerFt: "", pieceW: "", pieceH: "",
-    length: "", lengthUnit: "in", qty: "", totalWt: "",
+    alloy: "6063", lbPerFt: "", length: "", qty: "", totalWt: "", bundleW: "", bundleH: "",
   });
   const [extResult, setExtResult] = useState(null);
 
@@ -768,6 +598,7 @@ export default function ShippingCalc() {
     setSheetIn(prev => {
       const next = { ...prev, [key]: val };
       const wtPerPc = computeWtPerPc(next);
+
       if (wtPerPc && wtPerPc > 0) {
         if (key === "qty") {
           const q = parseInt(val);
@@ -776,6 +607,7 @@ export default function ShippingCalc() {
           const lbs = parseFloat(val);
           next.qty = lbs > 0 ? String(Math.round(lbs / wtPerPc)) : "";
         } else {
+          // Dimension changed — qty takes priority as source of truth
           if (next.qty && parseInt(next.qty) > 0) {
             next.totalWt = (parseInt(next.qty) * wtPerPc).toFixed(1);
           } else if (next.totalWt && parseFloat(next.totalWt) > 0) {
@@ -783,6 +615,7 @@ export default function ShippingCalc() {
           }
         }
       }
+
       return next;
     });
   };
@@ -792,6 +625,7 @@ export default function ShippingCalc() {
     setExtIn(prev => {
       const next = { ...prev, [key]: val };
       const wtPerPc = computeExtWtPerPc(next);
+
       if (wtPerPc && wtPerPc > 0) {
         if (key === "qty") {
           const q = parseInt(val);
@@ -799,8 +633,8 @@ export default function ShippingCalc() {
         } else if (key === "totalWt") {
           const lbs = parseFloat(val);
           next.qty = lbs > 0 ? String(Math.round(lbs / wtPerPc)) : "";
-        } else {
-          // shape, dim, length, alloy changed — qty takes priority
+        } else if (key === "lbPerFt" || key === "length") {
+          // Driver changed — qty takes priority as source of truth
           if (next.qty && parseInt(next.qty) > 0) {
             next.totalWt = (parseInt(next.qty) * wtPerPc).toFixed(1);
           } else if (next.totalWt && parseFloat(next.totalWt) > 0) {
@@ -808,21 +642,8 @@ export default function ShippingCalc() {
           }
         }
       }
-      return next;
-    });
-  };
 
-  // ── Length unit toggle — converts the entered number so physical length holds ─
-  const setExtUnit = unit => {
-    setExtIn(prev => {
-      if (prev.lengthUnit === unit) return prev;
-      let nl = prev.length;
-      const v = parseFloat(prev.length);
-      if (v && v > 0) {
-        const conv = unit === "ft" ? v / 12 : v * 12;
-        nl = String(parseFloat(conv.toFixed(4)));
-      }
-      return { ...prev, lengthUnit: unit, length: nl };
+      return next;
     });
   };
 
@@ -836,27 +657,21 @@ export default function ShippingCalc() {
   const extKey      = e => { if (e.key === "Enter") doExtCalc(); };
 
   const handleClear = () => {
-    setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20", coilsPerSkid: "1", stackOrient: "side", autoCoils: true, maxSkidWt: "5000", maxStackH: "72", maxRowLen: "96" });
-    setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "" });
-    setExtIn({
-      alloy: "6063", shape: "round_bar",
-      d: "", s: "", w: "", h: "", od: "", wall: "", a: "", b: "", t: "",
-      cd: "", cf: "", ct: "",
-      lbPerFt: "", pieceW: "", pieceH: "",
-      length: "", lengthUnit: "in", qty: "", totalWt: "",
-    });
+    setCoilIn({ alloy: "5052", thickness: "", width: "", weight: "", coreId: "20" });
+    setSheetIn({ alloy: "5052", thickness: "", width: "", length: "", qty: "", totalWt: "", maxStackH: "", maxSkidWt: "" });
+    setExtIn({ alloy: "6063", lbPerFt: "", length: "", qty: "", totalWt: "", bundleW: "", bundleH: "" });
     setCoilResult(null);
     setSheetResult(null);
     setExtResult(null);
   };
 
   const liveWtPerPc    = computeWtPerPc(sheetIn);
-  const liveCoilGeom   = coilGeom(coilIn);
-  const liveCoilCount  = (liveCoilGeom && !liveCoilGeom.error) ? coilCount(coilIn, liveCoilGeom) : null;
-  const coilNarrow     = parseFloat(coilIn.width) > 0 && parseFloat(coilIn.coreId) > 0 && parseFloat(coilIn.width) < parseFloat(coilIn.coreId);
   const liveExtWtPerPc = computeExtWtPerPc(extIn);
-  const liveExtProfile = extProfile(extIn, getDensity(extIn.alloy));
-  const extShapeCfg    = getShapeCfg(extIn.shape);
+  const liveExtArea    = (() => {
+    const lpf = parseFloat(extIn.lbPerFt), d = getDensity(extIn.alloy);
+    if (!lpf || lpf <= 0) return null;
+    return lpf / (d * 12);
+  })();
 
   return (
     <>
@@ -958,102 +773,12 @@ export default function ShippingCalc() {
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Weight (lbs/coil)</label>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Weight (lbs)</label>
                     <input type="number" step="1" value={coilIn.weight}
                       onChange={e => setC("weight")(e.target.value)} onKeyDown={coilKey} placeholder="6076"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                 </div>
-
-                {/* Stacking controls */}
-                <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Coils / Skid Mode</label>
-                    <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold">
-                      <button type="button" onClick={() => setC("autoCoils")(true)}
-                        className={`px-4 py-2 transition-colors ${coilIn.autoCoils ? "bg-red-700 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        AUTO-FIT
-                      </button>
-                      <button type="button" onClick={() => setC("autoCoils")(false)}
-                        className={`px-4 py-2 transition-colors border-l border-neutral-300 ${!coilIn.autoCoils ? "bg-neutral-800 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        MANUAL
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="sm:max-w-[120px]">
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Coils / Skid</label>
-                    <input type="number" step="1" min="1"
-                      value={coilIn.autoCoils ? (liveCoilCount ? liveCoilCount.n : "") : coilIn.coilsPerSkid}
-                      readOnly={coilIn.autoCoils}
-                      onChange={e => setC("coilsPerSkid")(e.target.value)} onKeyDown={coilKey} placeholder="1"
-                      className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-red-500 font-medium ${coilIn.autoCoils ? "border-neutral-400 bg-neutral-100 text-neutral-800 cursor-not-allowed font-bold" : "border-neutral-300 bg-white"}`} />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Stacking Orientation</label>
-                    <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold">
-                      <button type="button" onClick={() => setC("stackOrient")("side")}
-                        className={`px-4 py-2 transition-colors ${coilIn.stackOrient === "side" ? "bg-neutral-800 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        EYE TO SIDE
-                      </button>
-                      <button type="button" onClick={() => setC("stackOrient")("sky")}
-                        className={`px-4 py-2 transition-colors border-l border-neutral-300 ${coilIn.stackOrient === "sky" ? "bg-red-700 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        EYE TO SKY
-                      </button>
-                    </div>
-                  </div>
-
-                  {coilIn.autoCoils && (
-                    <>
-                      <div className="sm:max-w-[140px]">
-                        <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Skid Wt (lbs)</label>
-                        <input type="number" step="100" value={coilIn.maxSkidWt}
-                          onChange={e => setC("maxSkidWt")(e.target.value)} onKeyDown={coilKey} placeholder="5000"
-                          className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
-                      </div>
-                      {coilIn.stackOrient === "sky" ? (
-                        <div className="sm:max-w-[140px]">
-                          <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Stack Ht (in)</label>
-                          <input type="number" step="1" value={coilIn.maxStackH}
-                            onChange={e => setC("maxStackH")(e.target.value)} onKeyDown={coilKey} placeholder="72"
-                            className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
-                        </div>
-                      ) : (
-                        <div className="sm:max-w-[140px]">
-                          <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Row Len (in)</label>
-                          <input type="number" step="1" value={coilIn.maxRowLen}
-                            onChange={e => setC("maxRowLen")(e.target.value)} onKeyDown={coilKey} placeholder="96"
-                            className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                {/* Live count hint */}
-                <div className="mt-2 text-xs">
-                  {coilNarrow && (
-                    <span className="inline-block mr-3 px-2 py-0.5 rounded-full bg-red-50 text-red-700 font-semibold border border-red-200">
-                      Narrow coil (under {coilIn.coreId}" core) - good candidate for multiple per skid
-                    </span>
-                  )}
-                  {coilIn.autoCoils && liveCoilCount && (
-                    <span className="text-neutral-500">
-                      Fits <span className="font-bold text-neutral-800">{liveCoilCount.n}</span> coil{liveCoilCount.n === 1 ? "" : "s"}/skid
-                      {" "}({liveCoilCount.limit === "weight" ? `weight cap ${(parseFloat(coilIn.maxSkidWt) || 0).toLocaleString()} lbs` : `${liveCoilCount.limit} cap`})
-                      {" "}= <span className="font-bold text-neutral-800">{(liveCoilGeom.lbs * liveCoilCount.n).toLocaleString()} lbs</span> total
-                    </span>
-                  )}
-                  {!coilIn.autoCoils && (
-                    <span className="text-neutral-400">
-                      {coilIn.stackOrient === "sky"
-                        ? "Eye to sky: coils laid flat, stacked. Height = coils x width."
-                        : "Eye to side: coils stood in a saddle, lined up side by side. Height = OD."}
-                    </span>
-                  )}
-                </div>
-
                 <div className="mt-4 flex items-center gap-3">
                   <button onClick={doCoilCalc}
                     className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
@@ -1152,6 +877,25 @@ export default function ShippingCalc() {
                   <div className="hidden sm:block flex-1" />
                 </div>
 
+                {/* Row 3: per-skid caps */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Stack Ht (in)</label>
+                    <input type="number" step="1" value={sheetIn.maxStackH}
+                      onChange={e => updateSheet("maxStackH", e.target.value)} onKeyDown={sheetKey} placeholder="40"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Max Skid Wt (lb)</label>
+                    <input type="number" step="100" value={sheetIn.maxSkidWt}
+                      onChange={e => updateSheet("maxSkidWt", e.target.value)} onKeyDown={sheetKey} placeholder="4000"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div className="col-span-2 flex items-end">
+                    <p className="text-xs text-neutral-400 pb-2">Caps split the order across skids. Defaults: 40" stack, 4,000 lb/skid.</p>
+                  </div>
+                </div>
+
                 <div className="mt-4 flex items-center gap-3">
                   <button onClick={doSheetCalc}
                     className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
@@ -1169,7 +913,7 @@ export default function ShippingCalc() {
                   <span className="w-2 h-2 rounded-full bg-red-700"></span>Extrusion Parameters
                 </h2>
 
-                {/* Row 1: alloy, density, shape, then dynamic size fields */}
+                {/* Row 1: alloy, density, wt/ft, length, bundle W, bundle H */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-3">
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Alloy</label>
@@ -1184,62 +928,39 @@ export default function ShippingCalc() {
                       className="w-full px-3 py-2 text-sm border-2 border-neutral-400 rounded-lg bg-neutral-100 font-bold text-neutral-800 cursor-not-allowed" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Shape</label>
-                    <select value={extIn.shape} onChange={e => updateExt("shape", e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium">
-                      {EXT_SHAPES.map(sh => <option key={sh.key} value={sh.key}>{sh.label}</option>)}
-                    </select>
-                  </div>
-                  {extShapeCfg.fields.map(([k, lbl]) => (
-                    <div key={k}>
-                      <label className="block text-xs font-semibold mb-1.5 text-neutral-600">{lbl}</label>
-                      <input type="number" step="0.001" value={extIn[k]}
-                        onChange={e => updateExt(k, e.target.value)} onKeyDown={extKey}
-                        placeholder={k === "lbPerFt" ? "0.750" : "0.0"}
-                        className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
-                    </div>
-                  ))}
-                </div>
-
-                {/* Derived profile readout */}
-                {liveExtProfile && (
-                  <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-neutral-500">
-                    <span><span className="font-semibold text-neutral-700">Wt/ft:</span> {liveExtProfile.lbPerFt.toFixed(3)} lb/ft</span>
-                    <span><span className="font-semibold text-neutral-700">X-sec:</span> {liveExtProfile.area.toFixed(3)} in²</span>
-                    <span><span className="font-semibold text-neutral-700">Piece:</span> {fmtN(liveExtProfile.pieceW, 2)}" x {fmtN(liveExtProfile.pieceH, 2)}"</span>
-                  </div>
-                )}
-
-                {/* Row 2: Length + unit toggle */}
-                <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-3">
-                  <div className="sm:max-w-[200px]">
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">
-                      Length ({extIn.lengthUnit === "ft" ? "ft" : "in"})
+                      Weight / ft
+                      {liveExtArea && (
+                        <span className="ml-1 text-neutral-400 font-normal normal-case">
+                          {fmtN(liveExtArea, 3)} in²
+                        </span>
+                      )}
                     </label>
-                    <input type="number" step={extIn.lengthUnit === "ft" ? "0.5" : "1"} value={extIn.length}
-                      onChange={e => updateExt("length", e.target.value)} onKeyDown={extKey}
-                      placeholder={extIn.lengthUnit === "ft" ? "20" : "240"}
+                    <input type="number" step="0.001" value={extIn.lbPerFt}
+                      onChange={e => updateExt("lbPerFt", e.target.value)} onKeyDown={extKey} placeholder="0.750"
                       className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Unit</label>
-                    <div className="flex rounded-lg overflow-hidden border border-neutral-300 w-fit text-xs font-bold">
-                      <button type="button" onClick={() => setExtUnit("in")}
-                        className={`px-4 py-2 transition-colors ${extIn.lengthUnit === "in" ? "bg-neutral-800 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        IN
-                      </button>
-                      <button type="button" onClick={() => setExtUnit("ft")}
-                        className={`px-4 py-2 transition-colors border-l border-neutral-300 ${extIn.lengthUnit === "ft" ? "bg-red-700 text-white" : "bg-white text-neutral-600 hover:bg-neutral-100"}`}>
-                        FT
-                      </button>
-                    </div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Length (ft)</label>
+                    <input type="number" step="0.5" value={extIn.length}
+                      onChange={e => updateExt("length", e.target.value)} onKeyDown={extKey} placeholder="20"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
                   </div>
-                  {liveExtWtPerPc && (
-                    <p className="text-xs text-neutral-400 sm:pb-2">{fmtN(liveExtWtPerPc, 2)} lbs/pc at this length</p>
-                  )}
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Bundle W"</label>
+                    <input type="number" step="0.5" value={extIn.bundleW}
+                      onChange={e => updateExt("bundleW", e.target.value)} onKeyDown={extKey} placeholder="12"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Bundle H"</label>
+                    <input type="number" step="0.5" value={extIn.bundleH}
+                      onChange={e => updateExt("bundleH", e.target.value)} onKeyDown={extKey} placeholder="12"
+                      className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-red-500 bg-white font-medium" />
+                  </div>
                 </div>
 
-                {/* Row 3: Qty and Total Lbs linked pair */}
+                {/* Row 2: Qty and Total Lbs linked pair */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-0 sm:gap-0 w-full sm:w-auto">
                   <div className="flex-1 sm:max-w-[160px]">
                     <label className="block text-xs font-semibold mb-1.5 text-neutral-600">Qty (pcs)</label>
@@ -1285,7 +1006,7 @@ export default function ShippingCalc() {
                     className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-xl hover:from-red-700 hover:to-red-800 font-semibold text-sm shadow-lg">
                     CALCULATE ▸
                   </button>
-                  <p className="text-xs text-neutral-400">Pick the shape and size, then pcs or total weight. Bundle footprint is estimated from piece size.</p>
+                  <p className="text-xs text-neutral-400">weight/ft from the order. Bundle W x H optional - estimated from piece count if blank.</p>
                 </div>
               </div>
             )}
