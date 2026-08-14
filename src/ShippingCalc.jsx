@@ -1,3 +1,10 @@
+/*
+ * Shipping Dimensions Calculator
+ * Copyright (c) 2026 Erin Morgan. All rights reserved.
+ *
+ * Original work, authored independently.
+ * Unauthorized copying, modification, or distribution is prohibited.
+ */
 import { useState } from "react";
 import { Calculator, Trash2, AlertCircle, Info } from "lucide-react";
 
@@ -232,7 +239,7 @@ function CoilDetail({ result, inputs }) {
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
       <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
-          Shipping Dimensions — Coil
+          Shipping Dimensions - Coil
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-neutral-600 text-white border border-neutral-500">
             {result.prodType}
           </span>
@@ -294,7 +301,7 @@ function CoilDetail({ result, inputs }) {
             <p className="text-sm"><span className="font-medium text-neutral-600">Coil Weight:</span> <span className="font-bold">{lbs.toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
               <p className={`text-xs font-semibold ${heightOk ? "text-green-700" : heightWarn ? "text-amber-700" : "text-red-700"}`}>
-                {heightOk ? "✓ Standard dock clearance" : heightWarn ? "⚠ Verify dock/rack clearance" : "⛔ Oversized — special freight"}
+                {heightOk ? "✓ Standard dock clearance" : heightWarn ? "⚠ Verify dock/rack clearance" : "⛔ Oversized - special freight"}
               </p>
             </div>
           </div>
@@ -328,7 +335,7 @@ function SheetDetail({ result, inputs }) {
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
       <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
-          Shipping Dimensions — {result.prodType}
+          Shipping Dimensions - {result.prodType}
           <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${result.prodType === "PLATE" ? "bg-red-700 text-white" : "bg-neutral-600 text-white border border-neutral-500"}`}>
             {result.prodType}
           </span>
@@ -393,7 +400,7 @@ function SheetDetail({ result, inputs }) {
             <p className="text-sm"><span className="font-medium text-neutral-600">Order Total:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
               <p className={`text-xs font-semibold ${skidOk ? "text-green-700" : skidWarn ? "text-amber-700" : "text-red-700"}`}>
-                {skidOk ? "✓ Standard trailer length" : skidWarn ? "⚠ Long load — verify trailer" : "⛔ Oversized — special freight"}
+                {skidOk ? "✓ Standard trailer length" : skidWarn ? "⚠ Long load - verify trailer" : "⛔ Oversized - special freight"}
               </p>
             </div>
           </div>
@@ -428,7 +435,7 @@ function ExtrusionDetail({ result, inputs }) {
     <div className="glass-card rounded-2xl shadow-xl overflow-hidden mb-5 border border-neutral-200">
       <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 text-white px-5 py-4">
         <h2 className="text-lg font-bold tracking-wide flex items-center gap-3">
-          Shipping Dimensions — Extrusion
+          Shipping Dimensions - Extrusion
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-neutral-600 text-white border border-neutral-500">
             {result.prodType}
           </span>
@@ -493,7 +500,7 @@ function ExtrusionDetail({ result, inputs }) {
             <p className="text-sm"><span className="font-medium text-neutral-600">Bundle Wt:</span> <span className="font-bold">{parseFloat(result.totalWt).toLocaleString()} lbs</span></p>
             <div className="mt-2 pt-2 border-t border-amber-200">
               <p className={`text-xs font-semibold ${lenOk ? "text-green-700" : lenWarn ? "text-amber-700" : "text-red-700"}`}>
-                {lenOk ? "✓ Standard trailer length" : lenWarn ? "⚠ Long load — verify trailer" : "⛔ Oversized — flatbed / special"}
+                {lenOk ? "✓ Standard trailer length" : lenWarn ? "⚠ Long load - verify trailer" : "⛔ Oversized - flatbed / special"}
               </p>
             </div>
           </div>
@@ -527,7 +534,7 @@ function TechRef() {
         onClick={() => setCollapsed(v => !v)}
       >
         <h2 className="text-sm font-bold uppercase tracking-wide flex items-center gap-2">
-          <Info className="w-4 h-4" />Technical Reference — Densities &amp; Formulas
+          <Info className="w-4 h-4" />Technical Reference - Densities &amp; Formulas
         </h2>
         <span className="text-xs text-neutral-400">{collapsed ? "▶ expand" : "▼ collapse"}</span>
       </div>
@@ -553,7 +560,7 @@ function TechRef() {
                 <p><span className="font-bold text-neutral-800">OD:</span> sqrt(4 x L x t / pi + ID²)</p>
                 <p><span className="font-bold text-neutral-800">Stack Height:</span> OD + 6" skid</p>
                 <p className="mt-2 pt-2 border-t border-neutral-100">
-                  <span className="font-bold text-neutral-800">Saddle width</span> scales with OD — widens for large coils to maintain stability.
+                  <span className="font-bold text-neutral-800">Saddle width</span> scales with OD - widens for large coils to maintain stability.
                 </p>
               </div>
             </div>
@@ -575,7 +582,7 @@ function TechRef() {
               <div className="space-y-2 text-xs text-neutral-600">
                 <p><span className="font-bold text-neutral-800">Wt/Pc:</span> Wt-per-ft x Length(ft)</p>
                 <p><span className="font-bold text-neutral-800">Total Wt:</span> Wt/Pc x Qty</p>
-                <p><span className="font-bold text-neutral-800">X-Sec Area:</span> Wt-per-ft / (Density x 12) — derived in²</p>
+                <p><span className="font-bold text-neutral-800">X-Sec Area:</span> Wt-per-ft / (Density x 12) - derived in²</p>
                 <p><span className="font-bold text-neutral-800">Footprint:</span> Length x Bundle Width</p>
                 <p><span className="font-bold text-neutral-800">Total H:</span> Bundle Height + 4" bunks</p>
                 <p className="mt-2 pt-2 border-t border-neutral-100">Bundle W x H are optional. If blank, the bundle envelope is estimated from Qty x metal area at ~35% packing. Weight per ft does not carry the profile shape, so enter actual banded W x H for an exact footprint.</p>
@@ -1046,7 +1053,7 @@ export default function ShippingCalc() {
           <TechRef />
 
           <p className="text-center text-xs text-neutral-600 pb-4">
-            Erin Morgan — Ext. 289 &nbsp;|&nbsp; Densities: ASTM B209
+            Erin Morgan &nbsp;|&nbsp; Densities: ASTM B209
           </p>
         </div>
       </div>
