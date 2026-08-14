@@ -1053,7 +1053,7 @@ export default function ShippingCalc() {
           <TechRef />
 
           <p className="text-center text-xs text-neutral-600 pb-4">
-            Erin Morgan &nbsp;|&nbsp; Densities: ASTM B209
+            &copy; 2026 Erin Morgan &nbsp;|&nbsp; Densities: ASTM B209
           </p>
         </div>
       </div>
